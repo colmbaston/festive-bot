@@ -24,17 +24,9 @@ fn main() -> Result<(), Box<dyn Error>>
         println!("sending API request");
         let leaderboard = format!("https://adventofcode.com/{}/leaderboard/private/view/{}.json", YEAR, leaderboard);
         let text        = Client::new().get(&leaderboard).header("cookie", format!("session={}", session)).send()?.text()?;
-        let json        = match json::parse(&text)
-        {
-            Ok(json) => json,
-            Err(_)   =>
-            {
-                println!("could not read leaderboard data from API endpoint");
-                send_webhook(webhook, ":warning: Could not read leaderboard data from API endpoint :warning:")?;
-                continue
-            }
-        };
-        let events = vectorise_events(&json);
+        println!("parsing response");
+        let json        = json::parse(&text)?;
+        let events      = vectorise_events(&json);
 
         // read the timestamp of the latest-reported event from the filesystem, or default to zero
         let last_timestamp = File::open("timestamp.txt").ok().and_then(|mut f|
@@ -48,6 +40,7 @@ fn main() -> Result<(), Box<dyn Error>>
         for e in events.iter().filter(|e| e.timestamp > last_timestamp)
         {
             send_webhook(webhook, &format!("{}", e))?;
+            println!("updating timestamp");
             File::create("timestamp.txt")?.write_all(format!("{}\n", e.timestamp).as_bytes())?;
         }
     }
@@ -67,7 +60,7 @@ impl Display for Event
     fn fmt(&self, f : &mut Formatter) -> std::fmt::Result
     {
         let part = if self.star == 1 { "the first part" } else { "both parts" };
-        write!(f, ":star: {} has completed {} of puzzle {} :star:", self.name, part, self.day)
+        write!(f, ":star: {} has completed {} of puzzle {} ({}) :star:", self.name, part, self.day, YEAR)
     }
 }
 
@@ -112,7 +105,11 @@ fn send_webhook(url : &str, text : &str) -> Result<(), Box<dyn Error>>
 
         match response.status()
         {
-            StatusCode::NO_CONTENT        => { println!("success"); break },
+            StatusCode::NO_CONTENT =>
+            {
+                println!("success");
+                break
+            },
             StatusCode::TOO_MANY_REQUESTS =>
             {
                 let retry_ms = json::parse(&response.text()?)?["retry_after"].as_u64().unwrap();
