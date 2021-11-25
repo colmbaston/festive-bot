@@ -1,37 +1,56 @@
 use json::JsonValue;
 use reqwest::{ blocking::Client, StatusCode };
-use std::{ error::Error, fs::File, io::{ Read, Write }, fmt::{ Display, Formatter }};
+use std::{ error::Error, fs::File, io::{ Read, Write }, time::{ SystemTime, Duration }, fmt::{ Display, Formatter }};
+
+const YEAR  : &str = "2015";
+const DELAY : u128 = 1000 * 60 * 15;
 
 fn main() -> Result<(), Box<dyn Error>>
 {
     // data required for the bot to run
-    let year        = "2015";
     let session     = include_str!("../session.txt").trim_end();
     let leaderboard = include_str!("../leaderboard.txt").trim_end();
     let webhook     = include_str!("../webhook.txt").trim_end();
 
-    // send API request to the Advent of Code leaderboard, parse and vectorise the results
-    let leaderboard = format!("https://adventofcode.com/{}/leaderboard/private/view/{}.json", year, leaderboard);
-    let text        = Client::new().get(&leaderboard).header("cookie", format!("session={}", session)).send()?.text()?;
-    let json        = json::parse(&text)?;
-    let events      = vectorise_events(&json);
-
-    // read the timestamp of the latest-reported event from the filesystem, or default to zero
-    let timestamp = File::open("timestamp.txt").ok().and_then(|mut f|
+    loop
     {
-        let mut s = String::new();
-        f.read_to_string(&mut s).ok().and(s.trim_end().parse().ok())
-    })
-    .unwrap_or(0);
+        // wait until the next DELAY multiple
+        let unix     = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis();
+        let delay_ms = DELAY - unix % DELAY;
+        println!("sleeping for {}ms", delay_ms);
+        std::thread::sleep(Duration::from_millis(delay_ms as u64));
 
-    // send a webhook for each event that took place after the latest timestamp, updating the timestamp each time
-    for e in events.iter().filter(|e| e.timestamp > timestamp)
-    {
-        send_webhook(webhook, &format!("{}", e))?;
-        File::create("timestamp.txt")?.write_all(format!("{}\n", e.timestamp).as_bytes())?;
+        // send API request to the Advent of Code leaderboard, parse and vectorise the results
+        println!("sending API request");
+        let leaderboard = format!("https://adventofcode.com/{}/leaderboard/private/view/{}.json", YEAR, leaderboard);
+        let text        = Client::new().get(&leaderboard).header("cookie", format!("session={}", session)).send()?.text()?;
+        let json        = match json::parse(&text)
+        {
+            Ok(json) => json,
+            Err(_)   =>
+            {
+                println!("could not read leaderboard data from API endpoint");
+                send_webhook(webhook, ":warning: Could not read leaderboard data from API endpoint :warning:")?;
+                continue
+            }
+        };
+        let events = vectorise_events(&json);
+
+        // read the timestamp of the latest-reported event from the filesystem, or default to zero
+        let last_timestamp = File::open("timestamp.txt").ok().and_then(|mut f|
+        {
+            let mut s = String::new();
+            f.read_to_string(&mut s).ok().and(s.trim_end().parse().ok())
+        })
+        .unwrap_or(0);
+
+        // send a webhook for each event that took place after the latest timestamp, updating the timestamp each time
+        for e in events.iter().filter(|e| e.timestamp > last_timestamp)
+        {
+            send_webhook(webhook, &format!("{}", e))?;
+            File::create("timestamp.txt")?.write_all(format!("{}\n", e.timestamp).as_bytes())?;
+        }
     }
-
-    Ok(())
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
