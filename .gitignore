@@ -1,5 +1,2 @@
 /target
-session.txt
-leaderboard.txt
-webhook.txt
-timestamp.txt
+*.txt
