@@ -52,10 +52,10 @@ fn aoc_2021(webhook : &str)
 struct Event
 {
     timestamp: u64,
-    name:      String,
     year:      u16,
     day:       u8,
-    star:      u8
+    star:      u8,
+    name:      String
 }
 
 impl Display for Event
@@ -126,10 +126,10 @@ fn vectorise_events(json : &JsonValue) -> Result<Vec<Event>, Box<dyn Error>>
                 events.push(Event
                 {
                     timestamp: contents["get_star_ts"].to_string().parse()?,
-                    name:      name.clone(),
                     year:      json["event"].to_string().parse()?,
                     day:       day.parse()?,
-                    star:      star.parse()?
+                    star:      star.parse()?,
+                    name:      name.clone()
                 });
             }
         }
