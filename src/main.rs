@@ -91,10 +91,18 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Cli
         {
             // send API request to the Advent of Code leaderboard, parse and vectorise the results
             println!("sending API request for year {}", year);
-            let leaderboard = format!("https://adventofcode.com/{}/leaderboard/private/view/{}.json", year, leaderboard);
-            let text        = client.get(&leaderboard).header("cookie", format!("session={}", session)).send()?.text()?;
+            let url  = format!("https://adventofcode.com/{}/leaderboard/private/view/{}.json", year, leaderboard);
+            let text = loop
+            {
+                match client.get(&url).header("cookie", format!("session={}", session)).send()
+                {
+                    Ok(r)  => break r.text()?,
+                    Err(e) => eprintln!("{:?}", e)
+                }
+            };
+
             println!("parsing response");
-            let events      = vectorise_events(&json::parse(&text)?)?;
+            let events = vectorise_events(&json::parse(&text)?)?;
             println!("parsed {} events", events.len());
 
             // read the timestamp of the latest-reported event from the filesystem, or default to zero
