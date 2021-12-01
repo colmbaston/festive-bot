@@ -19,8 +19,13 @@ fn main() -> Result<(), Box<dyn Error>>
     let leaderboard = include_str!("../leaderboard.txt").trim_end();
     let webhook     = include_str!("../webhook.txt").trim_end();
 
-    std::thread::spawn(|| aoc_2021(webhook));
-    update_loop(session, leaderboard, webhook)
+    let client = Client::new();
+    let clone  = client.clone();
+    let handle = std::thread::spawn(move || aoc_2021(webhook, &client));
+    update_loop(session, leaderboard, webhook, &clone)?;
+    let _ = handle.join();
+
+    Ok(())
 }
 
 fn unix_millis() -> u128
@@ -30,21 +35,19 @@ fn unix_millis() -> u128
 
 fn sleep_until(timestamp : u64) -> bool
 {
-    let sleep_ms = (timestamp as u128 * 1000).saturating_sub(unix_millis());
-    if sleep_ms > 0
+    match (timestamp as u128 * 1000).checked_sub(unix_millis())
     {
-        std::thread::sleep(Duration::from_millis(sleep_ms as u64));
-        return true
+        Some(sleep_ms) => { std::thread::sleep(Duration::from_millis(sleep_ms as u64)); true },
+        None           => false
     }
-    false
 }
 
-fn aoc_2021(webhook : &str)
+fn aoc_2021(webhook : &str, client : &Client)
 {
     // UNIX timestamp for 2021/12/01 at 05:00 UTC
     if sleep_until(1_638_334_800)
     {
-        let _ = send_webhook(webhook, ":christmas_tree: Advent of Code 2021 is now live! :christmas_tree:");
+        let _ = send_webhook(webhook, client, ":christmas_tree: Advent of Code 2021 is now live! :christmas_tree:");
     }
 }
 
@@ -72,24 +75,27 @@ impl Display for Event
     }
 }
 
-fn update_loop(session : &str, leaderboard : &str, webhook : &str) -> Result<(), Box<dyn Error>>
+fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Client) -> Result<(), Box<dyn Error>>
 {
     loop
     {
         // send API requests only once every 15 minutes
         const DELAY : u128 = 1000 * 60 * 15;
-        let unix = unix_millis();
+        let unix      = unix_millis();
+        let wake_time = (unix + DELAY - unix % DELAY) / 1000;
         println!("sleeping");
-        sleep_until(((unix + DELAY - unix % DELAY) / 1000) as u64);
+        sleep_until(wake_time as u64);
+        println!("woke at {}", wake_time);
 
         for year in 2015 ..= 2021
         {
             // send API request to the Advent of Code leaderboard, parse and vectorise the results
             println!("sending API request for year {}", year);
             let leaderboard = format!("https://adventofcode.com/{}/leaderboard/private/view/{}.json", year, leaderboard);
-            let text        = Client::new().get(&leaderboard).header("cookie", format!("session={}", session)).send()?.text()?;
+            let text        = client.get(&leaderboard).header("cookie", format!("session={}", session)).send()?.text()?;
             println!("parsing response");
             let events      = vectorise_events(&json::parse(&text)?)?;
+            println!("parsed {} events", events.len());
 
             // read the timestamp of the latest-reported event from the filesystem, or default to zero
             println!("reading timestamp");
@@ -103,7 +109,7 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str) -> Result<(),
             // send a webhook for each event that took place after the latest timestamp, updating the timestamp each time
             for e in events.iter().skip_while(|e| e.timestamp <= last_timestamp)
             {
-                send_webhook(webhook, &format!("{}", e))?;
+                send_webhook(webhook, client, &format!("{}", e))?;
                 println!("writing timestamp");
                 File::create(format!("{}.txt", year))?.write_all(format!("{}\n", e.timestamp).as_bytes())?;
             }
@@ -139,17 +145,17 @@ fn vectorise_events(json : &JsonValue) -> Result<Vec<Event>, Box<dyn Error>>
     Ok(events)
 }
 
-fn send_webhook(url : &str, text : &str) -> Result<(), Box<dyn Error>>
+fn send_webhook(url : &str, client : &Client, text : &str) -> Result<(), Box<dyn Error>>
 {
     println!("sending webhook: {:?}", text);
     let json = json::object!{ content: text };
 
     loop
     {
-        let response = Client::new().post(url)
-                                    .header("Content-Type", "application/json")
-                                    .body(json.to_string())
-                                    .send()?;
+        let response = client.post(url)
+                             .header("Content-Type", "application/json")
+                             .body(json.to_string())
+                             .send()?;
 
         match response.status()
         {
