@@ -7,8 +7,8 @@ use reqwest::
 use std::
 {
     fs::File,
+    io::Read,
     error::Error,
-    io::{ Read, Write },
     fmt::{ Display, Formatter },
     time::{ SystemTime, Duration }
 };
@@ -77,6 +77,9 @@ impl Display for Event
 
 fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Client) -> Result<(), Box<dyn Error>>
 {
+    let mut events = Vec::new();
+    let mut buffer = String::new();
+
     loop
     {
         // send API requests only once every 15 minutes
@@ -102,15 +105,15 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Cli
             };
 
             println!("parsing response");
-            let events = vectorise_events(&json::parse(&text)?)?;
+            vectorise_events(&json::parse(&text)?, &mut events)?;
             println!("parsed {} events", events.len());
 
             // read the timestamp of the latest-reported event from the filesystem, or default to zero
             println!("reading timestamp");
             let last_timestamp = File::open(format!("{}.txt", year)).ok().and_then(|mut f|
             {
-                let mut s = String::new();
-                f.read_to_string(&mut s).ok().and(s.trim_end().parse().ok())
+                buffer.clear();
+                f.read_to_string(&mut buffer).ok().and(buffer.trim_end().parse().ok())
             })
             .unwrap_or(0);
 
@@ -119,15 +122,15 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Cli
             {
                 send_webhook(webhook, client, &format!("{}", e))?;
                 println!("writing timestamp");
-                File::create(format!("{}.txt", year))?.write_all(format!("{}\n", e.timestamp).as_bytes())?;
+                std::fs::write(format!("{}.txt", year), format!("{}\n", e.timestamp).as_bytes())?;
             }
         }
     }
 }
 
-fn vectorise_events(json : &JsonValue) -> Result<Vec<Event>, Box<dyn Error>>
+fn vectorise_events(json : &JsonValue, events : &mut Vec<Event>) -> Result<(), Box<dyn Error>>
 {
-    let mut events = Vec::new();
+    events.clear();
 
     for (_, member) in json["members"].entries()
     {
@@ -150,7 +153,7 @@ fn vectorise_events(json : &JsonValue) -> Result<Vec<Event>, Box<dyn Error>>
     }
 
     events.sort_unstable();
-    Ok(events)
+    Ok(())
 }
 
 fn send_webhook(url : &str, client : &Client, text : &str) -> Result<(), Box<dyn Error>>
