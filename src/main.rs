@@ -71,7 +71,7 @@ impl Display for Event
             _ => ("both parts",     ":star: :star:")
         };
 
-        write!(f, ":christmas_tree: [{}] {} has completed {} of day {:02}: {}", self.year, self.name, parts, self.day, star)
+        write!(f, ":christmas_tree: [{}] {} has completed {} of puzzle {:02}: {}", self.year, self.name, parts, self.day, star)
     }
 }
 
@@ -109,7 +109,7 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Cli
             println!("parsed {} events", events.len());
 
             // read the timestamp of the latest-reported event from the filesystem, or default to zero
-            println!("reading timestamp");
+            println!("reading timestamp from filesystem");
             let last_timestamp = File::open(format!("{}.txt", year)).ok().and_then(|mut f|
             {
                 buffer.clear();
@@ -121,7 +121,7 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Cli
             for e in events.iter().skip_while(|e| e.timestamp <= last_timestamp)
             {
                 send_webhook(webhook, client, &format!("{}", e))?;
-                println!("writing timestamp");
+                println!("updating timestamp on filesystem");
                 std::fs::write(format!("{}.txt", year), format!("{}\n", e.timestamp).as_bytes())?;
             }
         }
