@@ -124,7 +124,10 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Cli
                 println!("updating timestamp on filesystem");
                 std::fs::write(format!("{}.txt", year), format!("{}\n", e.timestamp).as_bytes())?;
             }
+
         }
+
+        println!("finished in {}ms", unix_millis() - wake_time * 1000);
     }
 }
 
