@@ -1,54 +1,14 @@
 use json::JsonValue;
-use reqwest::
-{
-    StatusCode,
-    blocking::Client
-};
-use std::
-{
-    fs::File,
-    io::Read,
-    error::Error,
-    fmt::{ Display, Formatter },
-    time::{ SystemTime, Duration }
-};
+use reqwest::{ StatusCode, blocking::Client };
+use chrono::{ Utc, Datelike, TimeZone, Duration, DurationRound };
+use std::{ fs::File, io::Read, error::Error, fmt::{ Display, Formatter }};
 
 fn main() -> Result<(), Box<dyn Error>>
 {
     let session     = include_str!("../session.txt").trim_end();
     let leaderboard = include_str!("../leaderboard.txt").trim_end();
     let webhook     = include_str!("../webhook.txt").trim_end();
-
-    let client = Client::new();
-    let clone  = client.clone();
-    let handle = std::thread::spawn(move || aoc_2021(webhook, &client));
-    update_loop(session, leaderboard, webhook, &clone)?;
-    let _ = handle.join();
-
-    Ok(())
-}
-
-fn unix_millis() -> u128
-{
-    SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis()
-}
-
-fn sleep_until(timestamp : u64) -> bool
-{
-    match (timestamp as u128 * 1000).checked_sub(unix_millis())
-    {
-        Some(sleep_ms) => { std::thread::sleep(Duration::from_millis(sleep_ms as u64)); true },
-        None           => false
-    }
-}
-
-fn aoc_2021(webhook : &str, client : &Client)
-{
-    // UNIX timestamp for 2021/12/01 at 05:00 UTC
-    if sleep_until(1_638_334_800)
-    {
-        let _ = send_webhook(webhook, client, ":christmas_tree: Advent of Code 2021 is now live! :christmas_tree:");
-    }
+    update_loop(session, leaderboard, webhook, &Client::new())
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
@@ -77,20 +37,36 @@ impl Display for Event
 
 fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Client) -> Result<(), Box<dyn Error>>
 {
+    // reusable buffers for efficiency
     let mut events = Vec::new();
     let mut buffer = String::new();
+
+    // populate currently-live Advent of Code events
+    let mut live = Vec::new();
+    let mut now  = Utc::now();
+    let year     = now.year();
+    live.extend(2015 .. year);
+    if now >= Utc.ymd(year, 12, 1).and_hms(5, 0, 0) { live.push(year) }
 
     loop
     {
         // send API requests only once every 15 minutes
-        const DELAY : u128 = 1000 * 60 * 15;
-        let unix      = unix_millis();
-        let wake_time = (unix + DELAY - unix % DELAY) / 1000;
-        println!("sleeping");
-        sleep_until(wake_time as u64);
-        println!("woke at {}", wake_time);
+        let delay = Duration::minutes(15);
+        let next  = now.duration_trunc(delay)? + delay;
+        println!("sleeping until {}", next);
+        std::thread::sleep((next - now).to_std()?);
+        println!("woke at {}", Utc::now());
 
-        for year in 2015 ..= 2021
+        // check if new Advent of Code event has started since this function was first called
+        let year  = now.year();
+        let start = Utc.ymd(year, 12, 1).and_hms(5, 0, 0);
+        if now < start && start <= next
+        {
+            live.push(year);
+            let _ = send_webhook(webhook, client, &format!(":christmas_tree: Advent of Code {} is now live! :christmas_tree:", year));
+        }
+
+        for year in live.iter()
         {
             // send API request to the Advent of Code leaderboard, parse and vectorise the results
             println!("sending API request for year {}", year);
@@ -103,7 +79,6 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Cli
                     Err(e) => eprintln!("{:?}", e)
                 }
             };
-
             println!("parsing response");
             vectorise_events(&json::parse(&text)?, &mut events)?;
             println!("parsed {} events", events.len());
@@ -124,10 +99,10 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Cli
                 println!("updating timestamp on filesystem");
                 std::fs::write(format!("{}.txt", year), format!("{}\n", e.timestamp).as_bytes())?;
             }
-
         }
 
-        println!("finished in {}ms", unix_millis() - wake_time * 1000);
+        now = Utc::now();
+        println!("finished at {}", now);
     }
 }
 
