@@ -8,7 +8,15 @@ fn main() -> Result<(), Box<dyn Error>>
     let session     = include_str!("../session.txt").trim_end();
     let leaderboard = include_str!("../leaderboard.txt").trim_end();
     let webhook     = include_str!("../webhook.txt").trim_end();
-    update_loop(session, leaderboard, webhook, &Client::new())
+
+    let client = Client::new();
+    if let Err(e) = update_loop(session, leaderboard, webhook, &client)
+    {
+        let _ = send_webhook(webhook, &client, ":christmas_tree: Festive Bot encountered an error and is exiting! :warning:");
+        return Err(e)
+    }
+
+    Ok(())
 }
 
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
