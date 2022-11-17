@@ -54,7 +54,7 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Cli
     let mut now  = Utc::now();
     let year     = now.year();
     live.extend(2015 .. year);
-    if now >= Utc.ymd(year, 12, 1).and_hms(5, 0, 0) { live.push(year) }
+    if now >= Utc.with_ymd_and_hms(year, 12, 1, 5, 0, 0).unwrap() { live.push(year) }
 
     loop
     {
@@ -67,7 +67,7 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Cli
 
         // check if new Advent of Code event has started since this function was first called
         let year  = now.year();
-        let start = Utc.ymd(year, 12, 1).and_hms(5, 0, 0);
+        let start = Utc.with_ymd_and_hms(year, 12, 1, 5, 0, 0).unwrap();
         if now < start && start <= next
         {
             live.push(year);
