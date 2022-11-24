@@ -1,18 +1,18 @@
 use json::JsonValue;
 use reqwest::{ StatusCode, blocking::Client };
 use chrono::{ Utc, Datelike, TimeZone, Duration, DurationRound };
-use std::{ fs::File, io::Read, error::Error, fmt::{ Display, Formatter }};
+use std::{ env, fs::File, io::Read, error::Error, fmt::{ Display, Formatter }};
 
 fn main() -> Result<(), Box<dyn Error>>
 {
-    let session     = include_str!("../session.txt").trim_end();
-    let leaderboard = include_str!("../leaderboard.txt").trim_end();
-    let webhook     = include_str!("../webhook.txt").trim_end();
+    let session     = env::var("FESTIVE_BOT_SESSION")?;
+    let leaderboard = env::var("FESTIVE_BOT_LEADERBOARD")?;
+    let webhook     = env::var("FESTIVE_BOT_WEBHOOK")?;
 
     let client = Client::new();
-    if let Err(e) = update_loop(session, leaderboard, webhook, &client)
+    if let Err(e) = update_loop(&session, &leaderboard, &webhook, &client)
     {
-        let _ = send_webhook(webhook, &client, ":christmas_tree: Festive Bot encountered an error and is exiting! :warning:");
+        let _ = send_webhook(&webhook, &client, ":christmas_tree: Festive Bot encountered an error and is exiting! :warning:");
         return Err(e)
     }
 
