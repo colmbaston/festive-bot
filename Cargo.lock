@@ -162,6 +162,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "json",
+ "rational",
  "reqwest",
 ]
 
@@ -621,6 +622,12 @@ checksum = "bbe448f377a7d6961e30f5955f9b8d106c3f5e449d493ee1b125c1d43c2b5179"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "rational"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e3d41778d690471216a19b270effae380a7f3a99bfc46a21491401f58d0c8512"
 
 [[package]]
 name = "redox_syscall"
