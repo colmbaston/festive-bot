@@ -1,8 +1,10 @@
 use json::JsonValue;
-use rational::Rational;
 use reqwest::{ StatusCode, blocking::Client };
 use chrono::{ Utc, DateTime, Datelike, TimeZone, Duration, DurationRound };
+use num::{ FromPrimitive, ToPrimitive, rational::BigRational };
 use std::{ fs::File, io::Read, error::Error, fmt::{ Display, Formatter }, collections::HashMap };
+
+const DECEMBER : u32 = 12;
 
 fn main() -> Result<(), Box<dyn Error>>
 {
@@ -16,10 +18,10 @@ fn main() -> Result<(), Box<dyn Error>>
         let _ = send_webhook(&webhook, &client, ":christmas_tree: Festive Bot encountered an error and is exiting! :warning:");
         return Err(e)
     }
-
     Ok(())
 }
 
+// year and day fields match corresponding components of DateTime<Utc>
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct Event
 {
@@ -33,7 +35,7 @@ struct Event
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Identifier
 {
-    numeric: u32,
+    numeric: u64,
     name:    String
 }
 
@@ -45,13 +47,12 @@ impl Display for Event
         {
             1 => ("the first part", ":star:"),
             2 => ("both parts",     ":star: :star:"),
-            _ => panic!("cannot display star {}", self.star)
+            _ => panic!("cannot display puzzle event with star {}", self.star)
         };
 
-        let  score          = self.score();
-        let (score, plural) = if score == Rational::one() { ("1".to_string(), "") } else { (format!("{score}"), "s") };
-
-        write!(f, ":christmas_tree: [{}] {} has completed {parts} of puzzle {:02}, scoring {score} point{plural} {stars}", self.year, self.id.name, self.day)
+        let score  = self.score();
+        let plural = if score == FromPrimitive::from_u8(1).unwrap() { "" } else { "s" };
+        write!(f, ":christmas_tree: [{}] {} has completed {parts} of puzzle {:02}, scoring {score} point{plural}! {stars}", self.year, self.id.name, self.day)
     }
 }
 
@@ -59,71 +60,57 @@ impl Event
 {
     fn days_to_complete(&self) -> i64
     {
-        let puzzle_release  = Utc.with_ymd_and_hms(self.year as i32, 12, self.day as u32, 5, 0, 0).unwrap();
+        let puzzle = Utc.with_ymd_and_hms(self.year, DECEMBER, self.day, 5, 0, 0).unwrap();
 
-        (self.timestamp - puzzle_release).num_days()
+        (self.timestamp - puzzle).num_days()
     }
 
     // custom scoring based on the reciprocal of full days since the puzzle was released
-    fn score(&self) -> Rational
+    fn score(&self) -> BigRational
     {
-        Rational::new(1, 1 + self.days_to_complete())
+        let ratio : BigRational = FromPrimitive::from_i64(1 + self.days_to_complete()).unwrap();
+        ratio.recip()
     }
 }
 
 fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Client) -> Result<(), Box<dyn Error>>
 {
-    println!("initialising");
-
     // reusable buffers for efficiency
+    println!("initialising cycle");
     let mut events = Vec::new();
     let mut buffer = String::new();
 
-    // populate currently-live Advent of Code events
+    // populate currently-live Advent of Code years
     let mut live = Vec::new();
-    let mut now  = Utc::now();
-    let year     = now.year();
+    let mut prev = Utc::now();
+    let year     = prev.year();
     live.extend(2015 .. year);
-    if now >= Utc.with_ymd_and_hms(year, 12, 1, 5, 0, 0).unwrap() { live.push(year) }
+    if prev >= Utc.with_ymd_and_hms(year, DECEMBER, 1, 5, 0, 0).unwrap() { live.push(year) }
+
+    // send API requests only once every 15 minutes
+    // use truncated timestamps to ensure complete coverage despite measurement imprecision
+    let delay = Duration::minutes(15);
+    prev      = prev.duration_trunc(delay)?;
 
     loop
     {
-        // send API requests only once every 15 minutes
-        let delay = Duration::minutes(15);
-
-        // use truncated now rather than fresh Utc::now() in case sleep lasts longer than expected
-        now = Utc::now();
-        println!("finished at {now}");
-        now = now.duration_trunc(delay)?;
-
-        // sleep until next cycle
-        let next = now + delay;
-        println!("sleeping until {next}");
-        println!();
-        std::thread::sleep((next - Utc::now()).to_std()?);
-        println!("woke at {}", Utc::now());
-
-        // check if new Advent of Code year has started since last cycle
-        let year  = now.year();
-        let start = Utc.with_ymd_and_hms(year, 12, 1, 5, 0, 0).unwrap();
-        if now < start && start <= next
+        // attempt to sleep until next iteration
+        let next = prev + delay;
+        match (next - Utc::now()).to_std()
         {
-            live.push(year);
-            let _ = send_webhook(webhook, client, &format!(":christmas_tree: Advent of Code {year} is now live! :christmas_tree:"));
+            Ok(duration) =>
+            {
+                println!("sleeping until {next}");
+                std::thread::sleep(duration);
+                println!("woke at {}", Utc::now());
+            },
+            Err(_) => println!("an iteration overran the delay duration, catching up")
         }
-        now = next;
+        println!();
 
-        // read ISO 8601 timestamp from filesystem for this leaderboard, defaulting to 28 days ago
-        println!("reading leaderboard timestamp from filesystem");
-        let timestamp = File::open(format!("timestamp_{leaderboard}")).ok().and_then(|mut f|
-        {
-            buffer.clear();
-            f.read_to_string(&mut buffer).ok()
-             .and_then(|_| DateTime::parse_from_rfc3339(buffer.trim()).ok())
-             .map(|dt| dt.with_timezone(&Utc))
-        })
-        .unwrap_or_else(|| { println!("timestamp read failed, defaulting to 28 days ago"); now - Duration::days(28) });
-        println!("timestamp: {timestamp}");
+        // extend live years if one has commenced this iteration
+        let start = Utc.with_ymd_and_hms(next.year(), DECEMBER, 1, 5, 0, 0).unwrap();
+        if prev < start && start <= next { live.push(year) }
 
         for &year in &live
         {
@@ -134,14 +121,56 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
             vectorise_events(&json::parse(&response)?, &mut events)?;
             println!("parsed {} events", events.len());
 
-            // send a webhook for each event that took place after the latest timestamp, updating the timestamp each time
-            for e in events.iter().skip_while(|e| e.timestamp <= timestamp)
+            // read RFC 3339 timestamp from filesystem, defaulting to 28 days before current iteration
+            println!("reading leaderboard timestamp from filesystem");
+            let timestamp = File::open(format!("timestamp_{year}_{leaderboard}")).ok().and_then(|mut f|
+            {
+                buffer.clear();
+                f.read_to_string(&mut buffer).ok()
+                 .and_then(|_| DateTime::parse_from_rfc3339(buffer.trim()).ok())
+                 .map(|dt| dt.with_timezone(&Utc))
+            })
+            .unwrap_or_else(|| { println!("timestamp read failed, defaulting to 28 days ago"); next - Duration::days(28) });
+            println!("obtained timestamp {timestamp}");
+
+            // send a webhook for each event, up to the wake time, that took place after the latest timestamp
+            for e in events.iter().skip_while(|e| e.timestamp <= timestamp).take_while(|e| e.timestamp <= next)
             {
                 send_webhook(webhook, client, &format!("{e}"))?;
                 println!("updating timestamp to {}", e.timestamp);
-                std::fs::write(format!("timestamp_{leaderboard}"), e.timestamp.to_rfc3339())?;
+                std::fs::write(format!("timestamp_{year}_{leaderboard}"), e.timestamp.to_rfc3339())?;
+            }
+
+            // check if AoC currently has a live year
+            if year == next.year()
+            {
+                let day    = next.day();
+                let puzzle = Utc.with_ymd_and_hms(year, DECEMBER, day, 5, 0, 0).unwrap();
+
+                if prev < puzzle && puzzle <= next
+                {
+                    // announce the beginning of a new AoC year
+                    if day == 1
+                    {
+                        send_webhook(webhook, client, &format!(":christmas_tree: Advent of Code {year} is now live! :christmas_tree:"))?
+                    }
+
+                    // announce a new puzzle
+                    if day <= 25
+                    {
+                        send_webhook(webhook, client, &format!(":christmas_tree: [{year}] Puzzle {day:02} is now available! :christmas_tree:"))?;
+                    }
+
+                    // anounce current leaderboard standings
+                    let report = if events.is_empty() { "No scores yet: start programming!".to_string() } else { standings(&events) };
+                    send_webhook(webhook, client, &format!(":christmas_tree: [{year}] Current Standings (Reciprocal Scoring) :christmas_tree:\n```{report}```"))?;
+                }
             }
         }
+
+        // roll over timestamps for next iteration
+        prev = next;
+        println!("iteration ended at {}", Utc::now());
     }
 }
 
@@ -184,17 +213,37 @@ fn vectorise_events(json : &JsonValue, events : &mut Vec<Event>) -> Result<(), B
     Ok(())
 }
 
-fn score_events(events : &[Event]) -> Vec<(&Identifier, Rational)>
+fn score_events(events : &[Event]) -> Vec<(&Identifier, BigRational)>
 {
-    let mut scores = HashMap::new();
+    // score histogram
+    let mut hist : HashMap<&Identifier, BigRational> = HashMap::new();
     for e in events
     {
-        *scores.entry(&e.id).or_insert_with(Rational::zero) += e.score();
+        *hist.entry(&e.id).or_insert_with(|| FromPrimitive::from_u8(0).unwrap()) += e.score();
     }
 
-    let mut scores = scores.into_iter().collect::<Vec<_>>();
-    scores.sort_unstable_by_key(|&(id, s)| (-s, &id.name, id.numeric));
+    // sort by score descending, then by name ascending, then by numeric ID ascending
+    let mut scores = hist.into_iter().collect::<Vec<_>>();
+    scores.sort_unstable_by_key(|(id, s)| (-s, &id.name, id.numeric));
     scores
+}
+
+fn standings(events : &[Event]) -> String
+{
+    // calculate maximum-length name for space padding
+    let scores   = score_events(events);
+    let max_name = scores.iter().map(|(id, _)| id.name.len()).max().unwrap_or(0);
+
+    // generate standings report, with one line per participant
+    let mut report = String::new();
+    for (id, score) in scores
+    {
+        report.push_str(&format!("{}:", id.name));
+        for _ in id.name.len() ..= max_name { report.push(' ') }
+        report.push_str(&format!("{:>5.02}", score.to_f64().unwrap()));
+        report.push('\n');
+    }
+    report
 }
 
 fn send_webhook(url : &str, client : &Client, text : &str) -> Result<(), Box<dyn Error>>
@@ -214,9 +263,9 @@ fn send_webhook(url : &str, client : &Client, text : &str) -> Result<(), Box<dyn
             StatusCode::NO_CONTENT        => break,
             StatusCode::TOO_MANY_REQUESTS =>
             {
-                let retry_ms = json::parse(&response.text()?)?["retry_after"].as_u64().unwrap_or(0);
-                println!("rate-limited for {}ms", retry_ms);
-                std::thread::sleep(std::time::Duration::from_millis(retry_ms));
+                let retry = json::parse(&response.text()?)?["retry_after"].as_f32().unwrap_or(0.0);
+                println!("rate-limited for {}s", retry);
+                std::thread::sleep(std::time::Duration::from_millis((retry * 1000.0) as u64));
             },
             c => println!("unexpected status code {}", c)
         }
