@@ -1,7 +1,8 @@
 use json::JsonValue;
+use rational::Rational;
 use reqwest::{ StatusCode, blocking::Client };
 use chrono::{ Utc, DateTime, Datelike, TimeZone, Duration, DurationRound };
-use std::{ fs::File, io::Read, error::Error, fmt::{ Display, Formatter }};
+use std::{ fs::File, io::Read, error::Error, fmt::{ Display, Formatter }, collections::HashMap };
 
 fn main() -> Result<(), Box<dyn Error>>
 {
@@ -9,8 +10,7 @@ fn main() -> Result<(), Box<dyn Error>>
     let session     = std::env::var("FESTIVE_BOT_SESSION")?;
     let webhook     = std::env::var("FESTIVE_BOT_WEBHOOK")?;
 
-    let client = Client::new();
-
+    let client    = Client::new();
     if let Err(e) = update_loop(&leaderboard, &session, &webhook, &client)
     {
         let _ = send_webhook(&webhook, &client, ":christmas_tree: Festive Bot encountered an error and is exiting! :warning:");
@@ -41,14 +41,33 @@ impl Display for Event
 {
     fn fmt(&self, f : &mut Formatter) -> std::fmt::Result
     {
-        let (parts, star) = match self.star
+        let (parts, stars) = match self.star
         {
             1 => ("the first part", ":star:"),
             2 => ("both parts",     ":star: :star:"),
             _ => panic!("cannot display star {}", self.star)
         };
 
-        write!(f, ":christmas_tree: [{}] {} has completed {} of puzzle {:02} {}", self.year, self.id.name, parts, self.day, star)
+        let  score          = self.score();
+        let (score, plural) = if score == Rational::one() { ("1".to_string(), "") } else { (format!("{score}"), "s") };
+
+        write!(f, ":christmas_tree: [{}] {} has completed {parts} of puzzle {:02}, scoring {score} point{plural} {stars}", self.year, self.id.name, self.day)
+    }
+}
+
+impl Event
+{
+    fn days_to_complete(&self) -> i64
+    {
+        let puzzle_release  = Utc.with_ymd_and_hms(self.year as i32, 12, self.day as u32, 5, 0, 0).unwrap();
+
+        (self.timestamp - puzzle_release).num_days()
+    }
+
+    // custom scoring based on the reciprocal of full days since the puzzle was released
+    fn score(&self) -> Rational
+    {
+        Rational::new(1, 1 + self.days_to_complete())
     }
 }
 
@@ -70,7 +89,7 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
     loop
     {
         // send API requests only once every 15 minutes
-        let delay = Duration::seconds(10);
+        let delay = Duration::minutes(15);
 
         // use truncated now rather than fresh Utc::now() in case sleep lasts longer than expected
         now = Utc::now();
@@ -128,9 +147,9 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
 
 fn request_events(year : i32, leaderboard : &str, session : &str, client : &Client) -> Result<String, Box<dyn Error>>
 {
-    let url = format!("https://adventofcode.com/{}/leaderboard/private/view/{}.json", year, leaderboard);
+    let url = format!("https://adventofcode.com/{year}/leaderboard/private/view/{leaderboard}.json");
 
-    match client.get(&url).header("cookie", format!("session={}", session)).send()
+    match client.get(&url).header("cookie", format!("session={session}")).send()
     {
         Ok(r)  => Ok(r.text()?),
         Err(e) => Err(Box::new(e))
@@ -163,6 +182,19 @@ fn vectorise_events(json : &JsonValue, events : &mut Vec<Event>) -> Result<(), B
 
     events.sort_unstable();
     Ok(())
+}
+
+fn score_events(events : &[Event]) -> Vec<(&Identifier, Rational)>
+{
+    let mut scores = HashMap::new();
+    for e in events
+    {
+        *scores.entry(&e.id).or_insert_with(Rational::zero) += e.score();
+    }
+
+    let mut scores = scores.into_iter().collect::<Vec<_>>();
+    scores.sort_unstable_by_key(|&(id, s)| (-s, &id.name, id.numeric));
+    scores
 }
 
 fn send_webhook(url : &str, client : &Client, text : &str) -> Result<(), Box<dyn Error>>
