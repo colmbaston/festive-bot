@@ -1,16 +1,17 @@
 use json::JsonValue;
 use reqwest::{ StatusCode, blocking::Client };
-use chrono::{ Utc, Datelike, TimeZone, Duration, DurationRound };
-use std::{ env, fs::File, io::Read, error::Error, fmt::{ Display, Formatter }};
+use chrono::{ Utc, DateTime, Datelike, TimeZone, Duration, DurationRound };
+use std::{ fs::File, io::Read, error::Error, fmt::{ Display, Formatter }};
 
 fn main() -> Result<(), Box<dyn Error>>
 {
-    let session     = env::var("FESTIVE_BOT_SESSION")?;
-    let leaderboard = env::var("FESTIVE_BOT_LEADERBOARD")?;
-    let webhook     = env::var("FESTIVE_BOT_WEBHOOK")?;
+    let leaderboard = std::env::var("FESTIVE_BOT_LEADERBOARD")?;
+    let session     = std::env::var("FESTIVE_BOT_SESSION")?;
+    let webhook     = std::env::var("FESTIVE_BOT_WEBHOOK")?;
 
     let client = Client::new();
-    if let Err(e) = update_loop(&session, &leaderboard, &webhook, &client)
+
+    if let Err(e) = update_loop(&leaderboard, &session, &webhook, &client)
     {
         let _ = send_webhook(&webhook, &client, ":christmas_tree: Festive Bot encountered an error and is exiting! :warning:");
         return Err(e)
@@ -22,11 +23,18 @@ fn main() -> Result<(), Box<dyn Error>>
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 struct Event
 {
-    timestamp: u64,
-    year:      u16,
-    day:       u8,
+    timestamp: DateTime<Utc>,
+    year:      i32,
+    day:       u32,
     star:      u8,
-    name:      String
+    id:        Identifier
+}
+
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct Identifier
+{
+    numeric: u32,
+    name:    String
 }
 
 impl Display for Event
@@ -36,14 +44,15 @@ impl Display for Event
         let (parts, star) = match self.star
         {
             1 => ("the first part", ":star:"),
-            _ => ("both parts",     ":star: :star:")
+            2 => ("both parts",     ":star: :star:"),
+            _ => panic!("cannot display star {}", self.star)
         };
 
-        write!(f, ":christmas_tree: [{}] {} has completed {} of puzzle {:02}: {}", self.year, self.name, parts, self.day, star)
+        write!(f, ":christmas_tree: [{}] {} has completed {} of puzzle {:02} {}", self.year, self.id.name, parts, self.day, star)
     }
 }
 
-fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Client) -> Result<(), Box<dyn Error>>
+fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Client) -> Result<(), Box<dyn Error>>
 {
     // reusable buffers for efficiency
     let mut events = Vec::new();
@@ -74,38 +83,37 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Cli
             let _ = send_webhook(webhook, client, &format!(":christmas_tree: Advent of Code {} is now live! :christmas_tree:", year));
         }
 
+        // read ISO 8601 timestamp from filesystem for this leaderboard, defaulting to 28 days ago
+        println!("reading leaderboard timestamp from filesystem");
+        let timestamp = File::open(format!("timestamp_{leaderboard}")).ok().and_then(|mut f|
+        {
+            buffer.clear();
+            f.read_to_string(&mut buffer).ok()
+             .and_then(|_| DateTime::parse_from_rfc3339(buffer.trim()).ok())
+             .map(|dt| dt.with_timezone(&Utc))
+        })
+        .unwrap_or_else(||
+        {
+            println!("timestamp read failed, defaulting to 28 days ago");
+            now - Duration::days(28)
+        });
+        println!("timestamp is {timestamp}");
+
         for year in live.iter()
         {
             // send API request to the Advent of Code leaderboard, parse and vectorise the results
             println!("sending API request for year {}", year);
-            let url  = format!("https://adventofcode.com/{}/leaderboard/private/view/{}.json", year, leaderboard);
-            let text = loop
-            {
-                match client.get(&url).header("cookie", format!("session={}", session)).send()
-                {
-                    Ok(r)  => break r.text()?,
-                    Err(e) => eprintln!("{:?}", e)
-                }
-            };
+            let response = request_events(*year, leaderboard, session, client)?;
             println!("parsing response");
-            vectorise_events(&json::parse(&text)?, &mut events)?;
+            vectorise_events(&json::parse(&response)?, &mut events)?;
             println!("parsed {} events", events.len());
 
-            // read the timestamp of the latest-reported event from the filesystem, or default to zero
-            println!("reading timestamp from filesystem");
-            let last_timestamp = File::open(format!("{}.txt", year)).ok().and_then(|mut f|
-            {
-                buffer.clear();
-                f.read_to_string(&mut buffer).ok().and(buffer.trim_end().parse().ok())
-            })
-            .unwrap_or(0);
-
             // send a webhook for each event that took place after the latest timestamp, updating the timestamp each time
-            for e in events.iter().skip_while(|e| e.timestamp <= last_timestamp)
+            for e in events.iter().skip_while(|e| e.timestamp <= timestamp)
             {
                 send_webhook(webhook, client, &format!("{}", e))?;
-                println!("updating timestamp on filesystem");
-                std::fs::write(format!("{}.txt", year), format!("{}\n", e.timestamp).as_bytes())?;
+                println!("updating leaderboard timestamp to {}", e.timestamp);
+                std::fs::write(format!("timestamp_{leaderboard}"), e.timestamp.to_rfc3339())?;
             }
         }
 
@@ -114,11 +122,22 @@ fn update_loop(session : &str, leaderboard : &str, webhook : &str, client : &Cli
     }
 }
 
+fn request_events(year : i32, leaderboard : &str, session : &str, client : &Client) -> Result<String, Box<dyn Error>>
+{
+    let url = format!("https://adventofcode.com/{}/leaderboard/private/view/{}.json", year, leaderboard);
+
+    match client.get(&url).header("cookie", format!("session={}", session)).send()
+    {
+        Ok(r)  => Ok(r.text()?),
+        Err(e) => Err(Box::new(e))
+    }
+}
+
 fn vectorise_events(json : &JsonValue, events : &mut Vec<Event>) -> Result<(), Box<dyn Error>>
 {
     events.clear();
 
-    for (_, member) in json["members"].entries()
+    for (id, member) in json["members"].entries()
     {
         let name = member["name"].to_string();
 
@@ -128,11 +147,11 @@ fn vectorise_events(json : &JsonValue, events : &mut Vec<Event>) -> Result<(), B
             {
                 events.push(Event
                 {
-                    timestamp: contents["get_star_ts"].to_string().parse()?,
+                    timestamp: Utc.timestamp_opt(contents["get_star_ts"].as_i64().unwrap(), 0).unwrap(),
                     year:      json["event"].to_string().parse()?,
                     day:       day.parse()?,
                     star:      star.parse()?,
-                    name:      name.clone()
+                    id:        Identifier { numeric: id.parse()?, name: name.clone() }
                 });
             }
         }
