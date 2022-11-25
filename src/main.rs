@@ -12,21 +12,10 @@ fn main() -> Result<(), Box<dyn Error>>
 
     let client = Client::new();
 
-    /*
     if let Err(e) = update_loop(&leaderboard, &session, &webhook, &client)
     {
         let _ = send_webhook(&webhook, &client, ":christmas_tree: Festive Bot encountered an error and is exiting! :warning:");
         return Err(e)
-    }
-    */
-
-    let mut events = Vec::new();
-    let response   = request_events(2021, &leaderboard, &session, &client)?;
-    vectorise_events(&json::parse(&response)?, &mut events)?;
-
-    for (id, s) in score_events(&events)
-    {
-        println!("{}: {}", id.name, s);
     }
 
     Ok(())
@@ -53,13 +42,16 @@ impl Display for Event
 {
     fn fmt(&self, f : &mut Formatter) -> std::fmt::Result
     {
-        let (parts, star) = match self.star
+        let (parts, stars) = match self.star
         {
             1 => ("the first part", ":star:"),
             _ => ("both parts",     ":star: :star:"),
         };
 
-        write!(f, ":christmas_tree: [{}] {} has completed {} of puzzle {:02} {}", self.year, self.id.name, parts, self.day, star)
+        let  score          = self.score();
+        let (score, plural) = if score == Rational::one() { ("1".to_string(), "") } else { (format!("{score}"), "s") };
+
+        write!(f, ":christmas_tree: [{}] {} has completed {parts} of puzzle {:02}, scoring {score} point{plural} {stars}", self.year, self.id.name, self.day)
     }
 }
 
