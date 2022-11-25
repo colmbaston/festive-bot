@@ -54,6 +54,8 @@ impl Display for Event
 
 fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Client) -> Result<(), Box<dyn Error>>
 {
+    println!("initialising");
+
     // reusable buffers for efficiency
     let mut events = Vec::new();
     let mut buffer = String::new();
@@ -68,20 +70,29 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
     loop
     {
         // send API requests only once every 15 minutes
-        let delay = Duration::minutes(15);
-        let next  = now.duration_trunc(delay)? + delay;
-        println!("sleeping until {}", next);
-        std::thread::sleep((next - now).to_std()?);
+        let delay = Duration::seconds(10);
+
+        // use truncated now rather than fresh Utc::now() in case sleep lasts longer than expected
+        now = Utc::now();
+        println!("finished at {now}");
+        now = now.duration_trunc(delay)?;
+
+        // sleep until next cycle
+        let next = now + delay;
+        println!("sleeping until {next}");
+        println!();
+        std::thread::sleep((next - Utc::now()).to_std()?);
         println!("woke at {}", Utc::now());
 
-        // check if new Advent of Code event has started since this function was first called
+        // check if new Advent of Code year has started since last cycle
         let year  = now.year();
         let start = Utc.with_ymd_and_hms(year, 12, 1, 5, 0, 0).unwrap();
         if now < start && start <= next
         {
             live.push(year);
-            let _ = send_webhook(webhook, client, &format!(":christmas_tree: Advent of Code {} is now live! :christmas_tree:", year));
+            let _ = send_webhook(webhook, client, &format!(":christmas_tree: Advent of Code {year} is now live! :christmas_tree:"));
         }
+        now = next;
 
         // read ISO 8601 timestamp from filesystem for this leaderboard, defaulting to 28 days ago
         println!("reading leaderboard timestamp from filesystem");
@@ -92,18 +103,14 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
              .and_then(|_| DateTime::parse_from_rfc3339(buffer.trim()).ok())
              .map(|dt| dt.with_timezone(&Utc))
         })
-        .unwrap_or_else(||
-        {
-            println!("timestamp read failed, defaulting to 28 days ago");
-            now - Duration::days(28)
-        });
-        println!("timestamp is {timestamp}");
+        .unwrap_or_else(|| { println!("timestamp read failed, defaulting to 28 days ago"); now - Duration::days(28) });
+        println!("timestamp: {timestamp}");
 
-        for year in live.iter()
+        for &year in &live
         {
             // send API request to the Advent of Code leaderboard, parse and vectorise the results
-            println!("sending API request for year {}", year);
-            let response = request_events(*year, leaderboard, session, client)?;
+            println!("sending API request for year {year}");
+            let response = request_events(year, leaderboard, session, client)?;
             println!("parsing response");
             vectorise_events(&json::parse(&response)?, &mut events)?;
             println!("parsed {} events", events.len());
@@ -111,14 +118,11 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
             // send a webhook for each event that took place after the latest timestamp, updating the timestamp each time
             for e in events.iter().skip_while(|e| e.timestamp <= timestamp)
             {
-                send_webhook(webhook, client, &format!("{}", e))?;
-                println!("updating leaderboard timestamp to {}", e.timestamp);
+                send_webhook(webhook, client, &format!("{e}"))?;
+                println!("updating timestamp to {}", e.timestamp);
                 std::fs::write(format!("timestamp_{leaderboard}"), e.timestamp.to_rfc3339())?;
             }
         }
-
-        now = Utc::now();
-        println!("finished at {}", now);
     }
 }
 
