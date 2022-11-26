@@ -4,8 +4,6 @@ use chrono::{ Utc, DateTime, Datelike, TimeZone, Duration, DurationRound };
 use num::{ FromPrimitive, ToPrimitive, rational::BigRational };
 use std::{ fs::File, io::Read, error::Error, fmt::{ Display, Formatter }, collections::HashMap };
 
-const DECEMBER : u32 = 12;
-
 fn main() -> Result<(), Box<dyn Error>>
 {
     let leaderboard = std::env::var("FESTIVE_BOT_LEADERBOARD")?;
@@ -60,9 +58,7 @@ impl Event
 {
     fn days_to_complete(&self) -> i64
     {
-        let puzzle = Utc.with_ymd_and_hms(self.year, DECEMBER, self.day, 5, 0, 0).unwrap();
-
-        (self.timestamp - puzzle).num_days()
+        (self.timestamp - puzzle_unlock(self.year, self.day)).num_days()
     }
 
     // custom scoring based on the reciprocal of full days since the puzzle was released
@@ -80,12 +76,12 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
     let mut events = Vec::new();
     let mut buffer = String::new();
 
-    // populate currently-live Advent of Code years
+    // populate currently-live AoC years
     let mut live = Vec::new();
     let mut prev = Utc::now();
     let year     = prev.year();
     live.extend(2015 .. year);
-    if prev >= Utc.with_ymd_and_hms(year, DECEMBER, 1, 5, 0, 0).unwrap() { live.push(year) }
+    if puzzle_unlock(year, 1) <= prev { live.push(year) }
 
     // send API requests only once every 15 minutes
     // use truncated timestamps to ensure complete coverage despite measurement imprecision
@@ -109,12 +105,12 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
         println!();
 
         // extend live years if one has commenced this iteration
-        let start = Utc.with_ymd_and_hms(next.year(), DECEMBER, 1, 5, 0, 0).unwrap();
+        let start = puzzle_unlock(next.year(), 1);
         if prev < start && start <= next { live.push(year) }
 
         for &year in &live
         {
-            // send API request to the Advent of Code leaderboard, parse and vectorise the results
+            // send API request to AoC, parse and vectorise the results
             println!("sending API request for year {year}");
             let response = request_events(year, leaderboard, session, client)?;
             println!("parsing response");
@@ -133,23 +129,23 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
             .unwrap_or_else(|| { println!("timestamp read failed, defaulting to 28 days ago"); next - Duration::days(28) });
             println!("obtained timestamp {timestamp}");
 
-            // send a webhook for each event, up to the wake time, that took place after the latest timestamp
-            for e in events.iter().skip_while(|e| e.timestamp <= timestamp).take_while(|e| e.timestamp <= next)
+            // send a webhook for each event that took place after the latest timestamp, up to the start of this iteration
+            for e in events.iter().skip_while(|e| e.timestamp <= timestamp).take_while(|e| e.timestamp < next)
             {
                 send_webhook(webhook, client, &format!("{e}"))?;
                 println!("updating timestamp to {}", e.timestamp);
                 std::fs::write(format!("timestamp_{year}_{leaderboard}"), e.timestamp.to_rfc3339())?;
             }
 
-            // check if AoC currently has a live year
+            // check if an AoC year is currently live
             if year == next.year()
             {
                 let day    = next.day();
-                let puzzle = Utc.with_ymd_and_hms(year, DECEMBER, day, 5, 0, 0).unwrap();
+                let puzzle = puzzle_unlock(year, day);
 
                 if prev < puzzle && puzzle <= next
                 {
-                    // announce the beginning of a new AoC year
+                    // announce a new AoC year
                     if day == 1
                     {
                         send_webhook(webhook, client, &format!(":christmas_tree: Advent of Code {year} is now live! :christmas_tree:"))?
@@ -172,6 +168,12 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
         prev = next;
         println!("iteration ended at {}", Utc::now());
     }
+}
+
+// puzzles unlock at 05:00 UTC each day from 1st to 25th December
+fn puzzle_unlock(year : i32, day : u32) -> DateTime<Utc>
+{
+    Utc.with_ymd_and_hms(year, 12, day, 5, 0, 0).unwrap()
 }
 
 fn request_events(year : i32, leaderboard : &str, session : &str, client : &Client) -> Result<String, Box<dyn Error>>
