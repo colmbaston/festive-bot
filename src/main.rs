@@ -33,8 +33,8 @@ struct Event
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Identifier
 {
-    numeric: u64,
-    name:    String
+    name:    String,
+    numeric: u64
 }
 
 impl Display for Event
@@ -205,7 +205,7 @@ fn vectorise_events(json : &JsonValue, events : &mut Vec<Event>) -> Result<(), B
                     year:      json["event"].to_string().parse()?,
                     day:       day.parse()?,
                     star:      star.parse()?,
-                    id:        Identifier { numeric: id.parse()?, name: name.clone() }
+                    id:        Identifier { name: name.clone(), numeric: id.parse()? }
                 });
             }
         }
@@ -224,9 +224,9 @@ fn score_events(events : &[Event]) -> Vec<(&Identifier, BigRational)>
         *hist.entry(&e.id).or_insert_with(|| FromPrimitive::from_u8(0).unwrap()) += e.score();
     }
 
-    // sort by score descending, then by name ascending, then by numeric ID ascending
+    // sort by score descending, then by Identifier ascending
     let mut scores = hist.into_iter().collect::<Vec<_>>();
-    scores.sort_unstable_by_key(|(id, s)| (-s, &id.name, id.numeric));
+    scores.sort_unstable_by_key(|(id, score)| (-score, *id));
     scores
 }
 
