@@ -13,7 +13,7 @@ fn main() -> Result<(), Box<dyn Error>>
     let client    = Client::new();
     if let Err(e) = update_loop(&leaderboard, &session, &webhook, &client)
     {
-        let _ = send_webhook(&webhook, &client, ":christmas_tree: Festive Bot encountered an error and is exiting! :warning:");
+        let _ = send_webhook(&webhook, &client, ":warning: Festive Bot encountered an error and is exiting! :warning:");
         return Err(e)
     }
     Ok(())
@@ -100,7 +100,7 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
                 std::thread::sleep(duration);
                 println!("woke at {}", Utc::now());
             },
-            Err(_) => println!("an iteration overran the delay duration, catching up")
+            Err(_) => println!("a previous iteration overran the delay duration, catching up")
         }
         println!();
 
@@ -137,40 +137,40 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
                 std::fs::write(format!("timestamp_{year}_{leaderboard}"), e.timestamp.to_rfc3339())?;
             }
 
-            // check if an AoC year is currently live
-            if year == next.year()
+            // make announcements once per day during December
+            if next.year() == year && next.month() == 12
             {
                 let day    = next.day();
                 let puzzle = puzzle_unlock(year, day);
-
                 if prev < puzzle && puzzle <= next
                 {
                     // announce a new AoC year
                     if day == 1
                     {
-                        send_webhook(webhook, client, &format!(":christmas_tree: Advent of Code {year} is now live! :christmas_tree:"))?
+                        send_webhook(webhook, client, &format!(":christmas_tree: [{year}] Advent of Code is now live! :christmas_tree:"))?
                     }
 
                     // announce a new puzzle
                     if day <= 25
                     {
-                        send_webhook(webhook, client, &format!(":christmas_tree: [{year}] Puzzle {day:02} is now available! :christmas_tree:"))?;
+                        send_webhook(webhook, client, &format!(":christmas_tree: [{year}] Puzzle {day:02} is now unlocked! :christmas_tree:"))?;
                     }
 
                     // anounce current leaderboard standings
-                    let report = if events.is_empty() { "No scores yet: start programming!".to_string() } else { standings(&events) };
-                    send_webhook(webhook, client, &format!(":christmas_tree: [{year}] Current Standings (Reciprocal Scoring) :christmas_tree:\n```{report}```"))?;
+                    let standings = if events.is_empty() { "No scores yet: get programming!".to_string() } else { standings(&events) };
+                    send_webhook(webhook, client, &format!(":christmas_tree: [{year}] Current Standings :christmas_tree:\n```{standings}```"))?;
                 }
             }
         }
 
         // roll over timestamps for next iteration
         prev = next;
-        println!("iteration ended at {}", Utc::now());
+        println!("completed iteration at {}", Utc::now());
     }
 }
 
 // puzzles unlock at 05:00 UTC each day from 1st to 25th December
+// additionally used for daily standings announcements on the 26th to 31st December
 fn puzzle_unlock(year : i32, day : u32) -> DateTime<Utc>
 {
     Utc.with_ymd_and_hms(year, 12, day, 5, 0, 0).unwrap()
@@ -237,15 +237,15 @@ fn standings(events : &[Event]) -> String
     let max_name = scores.iter().map(|(id, _)| id.name.len()).max().unwrap_or(0);
 
     // generate standings report, with one line per participant
-    let mut report = String::new();
+    let mut standings = String::new();
     for (id, score) in scores
     {
-        report.push_str(&format!("{}:", id.name));
-        for _ in id.name.len() ..= max_name { report.push(' ') }
-        report.push_str(&format!("{:>5.02}", score.to_f64().unwrap()));
-        report.push('\n');
+        standings.push_str(&format!("{}:", id.name));
+        for _ in id.name.len() ..= max_name { standings.push(' ') }
+        standings.push_str(&format!("{:>5.02}", score.to_f64().unwrap()));
+        standings.push('\n');
     }
-    report
+    standings
 }
 
 fn send_webhook(url : &str, client : &Client, text : &str) -> Result<(), Box<dyn Error>>
