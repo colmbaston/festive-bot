@@ -36,7 +36,7 @@ fn main() -> FestiveResult<()>
 
     // initiate the main loop
     let client    = Client::new();
-    if let Err(e) = notify_cycle(&leaderboard, &session, notify.as_deref(), &client)
+    if let Err(e) = notify_cycle(&leaderboard, &session, notify.as_deref(), status.as_deref(), &client)
     {
         // ignore these results
         let _ = send_webhook(":warning: Festive Bot experienced an unrecoverable error and is exiting! :warning:", status.as_deref(), &client);
@@ -46,7 +46,7 @@ fn main() -> FestiveResult<()>
     Ok(())
 }
 
-fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, client : &Client) -> FestiveResult<()>
+fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, status : Option<&str>, client : &Client) -> FestiveResult<()>
 {
     // reusable buffers for efficiency
     println!("initialising cycle");
@@ -60,7 +60,7 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, clien
     live.extend(2015 .. year);
     if puzzle_unlock(year, 1)? <= prev { live.push(year) }
 
-    // send API requests only once every 15 minutes
+    // send AoC API requests only once every 15 minutes
     // use truncated timestamps to ensure complete coverage despite measurement imprecision
     let delay = Duration::minutes(15);
     prev      = prev.duration_trunc(delay).map_err(|_| FestiveError::Conversion)?;
@@ -77,14 +77,22 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, clien
         }
         println!();
 
+        // send heartbeat STATUS message every three hours
+        let heartbeat = current.duration_trunc(Duration::hours(3)).map_err(|_| FestiveError::Conversion)?;
+        if prev < heartbeat && heartbeat <= current
+        {
+            println!("sending {heartbeat} heartbeat");
+            send_webhook(&format!(":information_source: Heartbeat {heartbeat}: Festive Bot is still alive! :hearts:"), status, client)?;
+        }
+
         // extend live years if one has commenced this iteration
         let start = puzzle_unlock(current.year(), 1)?;
         if prev < start && start <= current { live.push(year) }
 
         for &year in &live
         {
-            // send API request to AoC, parsing the response to a vector of events
-            println!("sending API request for year {year}");
+            // send AoC API request, parsing the response to a vector of events
+            println!("sending AoC API request for year {year}");
             let response = request_events(year, leaderboard, session, client)?;
             println!("parsing response");
             parse_events(&json::parse(&response).map_err(|_| FestiveError::Parse)?, &mut events)?;
@@ -103,7 +111,7 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, clien
             .unwrap_or_else(|| { println!("timestamp read failed, defaulting to 28 days ago"); current - Duration::days(28) });
             println!("obtained timestamp {timestamp}");
 
-            // send a webhook for each event that took place after the latest timestamp, up to the start of this iteration
+            // NOTIFY for each puzzle event that took place after the latest timestamp, up to the start of this iteration
             for e in events.iter().skip_while(|e| e.timestamp <= timestamp).take_while(|e| e.timestamp < current)
             {
                 send_webhook(&e.fmt()?, notify, client)?;
@@ -119,19 +127,19 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, clien
                 let puzzle = puzzle_unlock(year, day)?;
                 if prev < puzzle && puzzle <= current
                 {
-                    // announce a new AoC year
+                    // NOTIFY about a new AoC year
                     if day == 1
                     {
                         send_webhook(&format!(":christmas_tree: [{year}] Advent of Code is now live! :christmas_tree:"), notify, client)?
                     }
 
-                    // announce a new puzzle
+                    // NOTIFY about new puzzles
                     if day <= 25
                     {
                         send_webhook(&format!(":christmas_tree: [{year}] Puzzles for day {day:02} are now unlocked! :christmas_tree:"), notify, client)?;
                     }
 
-                    // anounce current leaderboard standings
+                    // NOTIFY current leaderboard standings
                     let standings = if events.is_empty() { "No scores yet: get programming!".to_string() } else { standings(&events)? };
                     send_webhook(&format!(":christmas_tree: [{year}] Current Standings :christmas_tree:\n```{standings}```"), notify, client)?;
                 }

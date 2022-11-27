@@ -14,7 +14,7 @@ Both variables may contain the same URL, and if unset, no HTTP requests will be 
 
 Per-year, per-leaderboard timestamp files (`timestamp_2015_123456` for year 2015 and leaderboard ID 123456) will will be written to the working directory.
 Puzzle events which occurred before this timestamp won't be reported.
-These files may be edited manually if desired: they should conform to the RFC 3339 date and time standard and be UTF-8 encoded.
+These files may be edited manually if desired: they should be UTF-8 encoded and conform to the RFC 3339 date and time standard.
 
 ## Scoring
 
