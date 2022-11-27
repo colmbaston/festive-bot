@@ -31,6 +31,8 @@ fn main() -> FestiveResult<()>
     // get optional environment variables
     let notify = std::env::var(NOTIFY).ok();
     let status = std::env::var(STATUS).ok();
+    if notify.is_none() { println!("no NOTIFY webhook provided") }
+    if status.is_none() { println!("no STATUS webhook provided") }
 
     // initiate the main loop
     let client    = Client::new();
