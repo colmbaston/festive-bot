@@ -217,10 +217,17 @@ fn request_events(year : i32, leaderboard : &str, session : &str, client : &Clie
 
     match response.status()
     {
+        // expected response, get the text from the payload
         StatusCode::OK => response.text().map_err(|_| FestiveError::Http),
 
+        // AoC responds with INTERNAL_SERVER_ERROR when the session cookie is invalid
+        StatusCode::INTERNAL_SERVER_ERROR =>
+        {
+            println!("the session cookie might have expired");
+            Err(FestiveError::Http)
+        }
+
         // unexpected status code
-        // INTERNAL_SERVER_ERROR probably means the session cookie expired
         _ => Err(FestiveError::Http)
     }
 }
