@@ -38,7 +38,7 @@ fn main() -> FestiveResult<()>
     let client    = Client::new();
     if let Err(e) = notify_cycle(&leaderboard, &session, notify.as_deref(), status.as_deref(), &client)
     {
-        // ignore these results
+        // attempt to send STATUS message for fatal error
         let _ = send_webhook(":warning: Festive Bot experienced an unrecoverable error and is exiting! :warning:", status.as_deref(), &client);
         let _ = send_webhook(&format!("Error: {e:?}"),                                                             status.as_deref(), &client);
         return Err(e)
@@ -99,8 +99,8 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
             println!("parsed {} events", events.len());
 
             // read RFC 3339 timestamp from filesystem, defaulting to 28 days before current iteration
-            println!("reading leaderboard timestamp from filesystem");
             let timestamp_path = PathBuf::from(format!("timestamp_{year}_{leaderboard}"));
+            println!("reading {}", timestamp_path.display());
             let timestamp      = File::open(&timestamp_path).ok().and_then(|mut f|
             {
                 buffer.clear();
