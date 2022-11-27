@@ -2,74 +2,49 @@ use json::JsonValue;
 use reqwest::{ StatusCode, blocking::Client };
 use chrono::{ Utc, DateTime, Datelike, TimeZone, Duration, DurationRound };
 use num::{ FromPrimitive, ToPrimitive, rational::BigRational };
-use std::{ fs::File, io::Read, error::Error, fmt::{ Display, Formatter }, collections::HashMap };
+use std::{ fs::File, io::Read, path::PathBuf, collections::HashMap };
 
-fn main() -> Result<(), Box<dyn Error>>
+pub type FestiveResult<T> = Result<T, FestiveError>;
+
+#[derive(Debug)]
+pub enum FestiveError
 {
-    let leaderboard = std::env::var("FESTIVE_BOT_LEADERBOARD")?;
-    let session     = std::env::var("FESTIVE_BOT_SESSION")?;
-    let webhook     = std::env::var("FESTIVE_BOT_WEBHOOK")?;
+    EnvVar(&'static str),
+    Conversion,
+    Filesystem,
+    Http,
+    Parse
+}
 
+fn main() -> FestiveResult<()>
+{
+    // environment variable names
+    const LEADERBOARD : &str = "FESTIVE_BOT_LEADERBOARD";
+    const SESSION     : &str = "FESTIVE_BOT_SESSION";
+    const NOTIFY      : &str = "FESTIVE_BOT_NOTIFY";
+    const STATUS      : &str = "FESTIVE_BOT_STATUS";
+
+    // get mandatory environment variables
+    let leaderboard = std::env::var(LEADERBOARD).map_err(|_| FestiveError::EnvVar(LEADERBOARD))?;
+    let session     = std::env::var(SESSION).map_err(|_|     FestiveError::EnvVar(SESSION))?;
+
+    // get optional environment variables
+    let notify = std::env::var(NOTIFY).ok();
+    let status = std::env::var(STATUS).ok();
+
+    // initiate the main loop
     let client    = Client::new();
-    if let Err(e) = update_loop(&leaderboard, &session, &webhook, &client)
+    if let Err(e) = notify_cycle(&leaderboard, &session, notify.as_deref(), &client)
     {
-        let _ = send_webhook(&webhook, &client, ":warning: Festive Bot encountered an error and is exiting! :warning:");
+        // ignore these results
+        let _ = send_webhook(":warning: Festive Bot experienced an unrecoverable error and is exiting! :warning:", status.as_deref(), &client);
+        let _ = send_webhook(&format!("Error: {e:?}"),                                                             status.as_deref(), &client);
         return Err(e)
     }
     Ok(())
 }
 
-// year and day fields match corresponding components of DateTime<Utc>
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
-struct Event
-{
-    timestamp: DateTime<Utc>,
-    year:      i32,
-    day:       u32,
-    star:      u8,
-    id:        Identifier
-}
-
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
-struct Identifier
-{
-    name:    String,
-    numeric: u64
-}
-
-impl Display for Event
-{
-    fn fmt(&self, f : &mut Formatter) -> std::fmt::Result
-    {
-        let (parts, stars) = match self.star
-        {
-            1 => ("the first part", ":star:"),
-            2 => ("both parts",     ":star: :star:"),
-            _ => panic!("cannot display puzzle event with star {}", self.star)
-        };
-
-        let score  = self.score();
-        let plural = if score == FromPrimitive::from_u8(1).unwrap() { "" } else { "s" };
-        write!(f, ":christmas_tree: [{}] {} has completed {parts} of puzzle {:02}, scoring {score} point{plural}! {stars}", self.year, self.id.name, self.day)
-    }
-}
-
-impl Event
-{
-    fn days_to_complete(&self) -> i64
-    {
-        (self.timestamp - puzzle_unlock(self.year, self.day)).num_days()
-    }
-
-    // custom scoring based on the reciprocal of full days since the puzzle was released
-    fn score(&self) -> BigRational
-    {
-        let ratio : BigRational = FromPrimitive::from_i64(1 + self.days_to_complete()).unwrap();
-        ratio.recip()
-    }
-}
-
-fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Client) -> Result<(), Box<dyn Error>>
+fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, client : &Client) -> FestiveResult<()>
 {
     // reusable buffers for efficiency
     println!("initialising cycle");
@@ -81,113 +56,166 @@ fn update_loop(leaderboard : &str, session : &str, webhook : &str, client : &Cli
     let mut prev = Utc::now();
     let year     = prev.year();
     live.extend(2015 .. year);
-    if puzzle_unlock(year, 1) <= prev { live.push(year) }
+    if puzzle_unlock(year, 1)? <= prev { live.push(year) }
 
     // send API requests only once every 15 minutes
     // use truncated timestamps to ensure complete coverage despite measurement imprecision
     let delay = Duration::minutes(15);
-    prev      = prev.duration_trunc(delay)?;
+    prev      = prev.duration_trunc(delay).map_err(|_| FestiveError::Conversion)?;
 
     loop
     {
         // attempt to sleep until next iteration
-        let next = prev + delay;
-        match (next - Utc::now()).to_std()
+        let current = prev + delay;
+        println!("attempting to sleep until {current}");
+        match (current - Utc::now()).to_std()
         {
-            Ok(duration) =>
-            {
-                println!("sleeping until {next}");
-                std::thread::sleep(duration);
-                println!("woke at {}", Utc::now());
-            },
-            Err(_) => println!("a previous iteration overran the delay duration, catching up")
+            Ok(duration) => { std::thread::sleep(duration); println!("woke at {}", Utc::now()) },
+            Err(_)       => println!("not sleeping, a previous iteration overran")
         }
         println!();
 
         // extend live years if one has commenced this iteration
-        let start = puzzle_unlock(next.year(), 1);
-        if prev < start && start <= next { live.push(year) }
+        let start = puzzle_unlock(current.year(), 1)?;
+        if prev < start && start <= current { live.push(year) }
 
         for &year in &live
         {
-            // send API request to AoC, parse and vectorise the results
+            // send API request to AoC, parsing the response to a vector of events
             println!("sending API request for year {year}");
             let response = request_events(year, leaderboard, session, client)?;
             println!("parsing response");
-            vectorise_events(&json::parse(&response)?, &mut events)?;
+            parse_events(&json::parse(&response).map_err(|_| FestiveError::Parse)?, &mut events)?;
             println!("parsed {} events", events.len());
 
             // read RFC 3339 timestamp from filesystem, defaulting to 28 days before current iteration
             println!("reading leaderboard timestamp from filesystem");
-            let timestamp = File::open(format!("timestamp_{year}_{leaderboard}")).ok().and_then(|mut f|
+            let timestamp_path = PathBuf::from(format!("timestamp_{year}_{leaderboard}"));
+            let timestamp      = File::open(&timestamp_path).ok().and_then(|mut f|
             {
                 buffer.clear();
                 f.read_to_string(&mut buffer).ok()
                  .and_then(|_| DateTime::parse_from_rfc3339(buffer.trim()).ok())
                  .map(|dt| dt.with_timezone(&Utc))
             })
-            .unwrap_or_else(|| { println!("timestamp read failed, defaulting to 28 days ago"); next - Duration::days(28) });
+            .unwrap_or_else(|| { println!("timestamp read failed, defaulting to 28 days ago"); current - Duration::days(28) });
             println!("obtained timestamp {timestamp}");
 
             // send a webhook for each event that took place after the latest timestamp, up to the start of this iteration
-            for e in events.iter().skip_while(|e| e.timestamp <= timestamp).take_while(|e| e.timestamp < next)
+            for e in events.iter().skip_while(|e| e.timestamp <= timestamp).take_while(|e| e.timestamp < current)
             {
-                send_webhook(webhook, client, &format!("{e}"))?;
+                send_webhook(&e.fmt()?, notify, client)?;
                 println!("updating timestamp to {}", e.timestamp);
-                std::fs::write(format!("timestamp_{year}_{leaderboard}"), e.timestamp.to_rfc3339())?;
+
+                std::fs::write(&timestamp_path, e.timestamp.to_rfc3339()).map_err(|_| FestiveError::Filesystem)?;
             }
 
             // make announcements once per day during December
-            if next.year() == year && next.month() == 12
+            if current.year() == year && current.month() == 12
             {
-                let day    = next.day();
-                let puzzle = puzzle_unlock(year, day);
-                if prev < puzzle && puzzle <= next
+                let day    = current.day();
+                let puzzle = puzzle_unlock(year, day)?;
+                if prev < puzzle && puzzle <= current
                 {
                     // announce a new AoC year
                     if day == 1
                     {
-                        send_webhook(webhook, client, &format!(":christmas_tree: [{year}] Advent of Code is now live! :christmas_tree:"))?
+                        send_webhook(&format!(":christmas_tree: [{year}] Advent of Code is now live! :christmas_tree:"), notify, client)?
                     }
 
                     // announce a new puzzle
                     if day <= 25
                     {
-                        send_webhook(webhook, client, &format!(":christmas_tree: [{year}] Puzzle {day:02} is now unlocked! :christmas_tree:"))?;
+                        send_webhook(&format!(":christmas_tree: [{year}] Puzzles for day {day:02} are now unlocked! :christmas_tree:"), notify, client)?;
                     }
 
                     // anounce current leaderboard standings
-                    let standings = if events.is_empty() { "No scores yet: get programming!".to_string() } else { standings(&events) };
-                    send_webhook(webhook, client, &format!(":christmas_tree: [{year}] Current Standings :christmas_tree:\n```{standings}```"))?;
+                    let standings = if events.is_empty() { "No scores yet: get programming!".to_string() } else { standings(&events)? };
+                    send_webhook(&format!(":christmas_tree: [{year}] Current Standings :christmas_tree:\n```{standings}```"), notify, client)?;
                 }
             }
         }
 
         // roll over timestamps for next iteration
-        prev = next;
+        prev = current;
         println!("completed iteration at {}", Utc::now());
     }
 }
 
 // puzzles unlock at 05:00 UTC each day from 1st to 25th December
 // additionally used for daily standings announcements on the 26th to 31st December
-fn puzzle_unlock(year : i32, day : u32) -> DateTime<Utc>
+fn puzzle_unlock(year : i32, day : u32) -> FestiveResult<DateTime<Utc>>
 {
-    Utc.with_ymd_and_hms(year, 12, day, 5, 0, 0).unwrap()
+    Utc.with_ymd_and_hms(year, 12, day, 5, 0, 0).single().ok_or(FestiveError::Conversion)
 }
 
-fn request_events(year : i32, leaderboard : &str, session : &str, client : &Client) -> Result<String, Box<dyn Error>>
+// puzzle completion events parsed from AoC API
+// year and day fields match corresponding components of DateTime<Utc>
+#[derive(PartialEq, Eq, PartialOrd, Ord)]
+struct Event
 {
-    let url = format!("https://adventofcode.com/{year}/leaderboard/private/view/{leaderboard}.json");
+    timestamp: DateTime<Utc>,
+    year:      i32,
+    day:       u32,
+    star:      u8,
+    id:        Identifier
+}
 
-    match client.get(&url).header("cookie", format!("session={session}")).send()
+// unique identifier for participant on this leaderboard
+#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct Identifier
+{
+    name:    String,
+    numeric: u64
+}
+
+impl Event
+{
+    // not using Display trait so FestiveResult can be returned
+    fn fmt(&self) -> FestiveResult<String>
     {
-        Ok(r)  => Ok(r.text()?),
-        Err(e) => Err(Box::new(e))
+        let (parts, stars) = match self.star
+        {
+            1 => ("the first part", ":star:"),
+            2 => ("both parts",     ":star: :star:"),
+            _ => return Err(FestiveError::Parse)
+        };
+
+        let score  = self.score()?;
+        let plural = if score == num::one() { "" } else { "s" };
+        Ok(format!(":christmas_tree: [{}] {} has completed {parts} of puzzle {:02}, scoring {score} point{plural}! {stars}", self.year, self.id.name, self.day))
+    }
+
+    // custom scoring based on the reciprocal of full days since the puzzle was released
+    fn score(&self) -> FestiveResult<BigRational>
+    {
+        let days                = (self.timestamp - puzzle_unlock(self.year, self.day)?).num_days();
+        let ratio : BigRational = FromPrimitive::from_i64(1 + days).ok_or(FestiveError::Conversion)?;
+        Ok(ratio.recip())
     }
 }
 
-fn vectorise_events(json : &JsonValue, events : &mut Vec<Event>) -> Result<(), Box<dyn Error>>
+fn request_events(year : i32, leaderboard : &str, session : &str, client : &Client) -> FestiveResult<String>
+{
+    let url = format!("https://adventofcode.com/{year}/leaderboard/private/view/{leaderboard}.json");
+
+    // send HTTP request
+    let response = client.get(&url)
+                         .header("cookie", format!("session={session}"))
+                         .send()
+                         .map_err(|_| FestiveError::Http)?;
+
+    match response.status()
+    {
+        StatusCode::OK => response.text().map_err(|_| FestiveError::Http),
+
+        // unexpected status code
+        // INTERNAL_SERVER_ERROR probably means the session cookie expired
+        _ => Err(FestiveError::Http)
+    }
+}
+
+fn parse_events(json : &JsonValue, events : &mut Vec<Event>) -> FestiveResult<()>
 {
     events.clear();
 
@@ -201,11 +229,11 @@ fn vectorise_events(json : &JsonValue, events : &mut Vec<Event>) -> Result<(), B
             {
                 events.push(Event
                 {
-                    timestamp: Utc.timestamp_opt(contents["get_star_ts"].as_i64().unwrap(), 0).unwrap(),
-                    year:      json["event"].to_string().parse()?,
-                    day:       day.parse()?,
-                    star:      star.parse()?,
-                    id:        Identifier { name: name.clone(), numeric: id.parse()? }
+                    timestamp: Utc.timestamp_opt(contents["get_star_ts"].as_i64().ok_or(FestiveError::Parse)?, 0).single().ok_or(FestiveError::Conversion)?,
+                    year:      json["event"].to_string().parse().map_err(|_| FestiveError::Parse)?,
+                    day:       day.parse().map_err(|_| FestiveError::Parse)?,
+                    star:      star.parse().map_err(|_| FestiveError::Parse)?,
+                    id:        Identifier { name: name.clone(), numeric: id.parse().map_err(|_| FestiveError::Parse)? }
                 });
             }
         }
@@ -215,25 +243,25 @@ fn vectorise_events(json : &JsonValue, events : &mut Vec<Event>) -> Result<(), B
     Ok(())
 }
 
-fn score_events(events : &[Event]) -> Vec<(&Identifier, BigRational)>
+fn score_events(events : &[Event]) -> FestiveResult<Vec<(&Identifier, BigRational)>>
 {
     // score histogram
     let mut hist : HashMap<&Identifier, BigRational> = HashMap::new();
     for e in events
     {
-        *hist.entry(&e.id).or_insert_with(|| FromPrimitive::from_u8(0).unwrap()) += e.score();
+        *hist.entry(&e.id).or_insert_with(num::zero) += e.score()?;
     }
 
     // sort by score descending, then by Identifier ascending
     let mut scores = hist.into_iter().collect::<Vec<_>>();
     scores.sort_unstable_by_key(|(id, score)| (-score, *id));
-    scores
+    Ok(scores)
 }
 
-fn standings(events : &[Event]) -> String
+fn standings(events : &[Event]) -> FestiveResult<String>
 {
     // calculate maximum-length name for space padding
-    let scores   = score_events(events);
+    let scores   = score_events(events)?;
     let max_name = scores.iter().map(|(id, _)| id.name.len()).max().unwrap_or(0);
 
     // generate standings report, with one line per participant
@@ -242,38 +270,49 @@ fn standings(events : &[Event]) -> String
     {
         standings.push_str(&format!("{}:", id.name));
         for _ in id.name.len() ..= max_name { standings.push(' ') }
-        standings.push_str(&format!("{:>5.02}", score.to_f64().unwrap()));
+        standings.push_str(&format!("{:>5.02}", score.to_f64().ok_or(FestiveError::Conversion)?));
         standings.push('\n');
     }
-    standings
+    Ok(standings)
 }
 
-fn send_webhook(url : &str, client : &Client, text : &str) -> Result<(), Box<dyn Error>>
+fn send_webhook(payload : &str, webhook : Option<&str>, client : &Client) -> FestiveResult<()>
 {
-    println!("sending webhook: {:?}", text);
-    let json = json::object!{ content: text };
+    println!("webhook: {:?}", payload);
 
-    loop
+    // only send HTTP request if webhook actually contains a URL
+    if let Some(url) = webhook
     {
-        let response = client.post(url)
-                             .header("Content-Type", "application/json")
-                             .body(json.to_string())
-                             .send()?;
+        let json = json::object!{ content: payload };
 
-        match response.status()
+        loop
         {
-            StatusCode::NO_CONTENT        => break,
-            StatusCode::TOO_MANY_REQUESTS =>
+            // send request
+            let response = client.post(url)
+                                 .header("Content-Type", "application/json")
+                                 .body(json.to_string())
+                                 .send()
+                                 .map_err(|_| FestiveError::Http)?;
+
+            match response.status()
             {
-                let retry = json::parse(&response.text()?)?["retry_after"].as_f32().unwrap_or(0.0);
-                println!("rate-limited for {}s", retry);
-                std::thread::sleep(std::time::Duration::from_millis((retry * 1000.0) as u64));
-            },
-            c => println!("unexpected status code {}", c)
+                // expected status codes for successful request
+                StatusCode::OK | StatusCode::NO_CONTENT => break,
+
+                // keep retrying request until rate-limiting period ends
+                StatusCode::TOO_MANY_REQUESTS =>
+                {
+                    let retry = json::parse(&response.text().map_err(|_| FestiveError::Http)?).map_err(|_| FestiveError::Parse)?["retry_after"].as_f32().unwrap_or(0.0);
+                    println!("rate-limited for {}s", retry);
+                    std::thread::sleep(std::time::Duration::from_millis((retry * 1000.0) as u64));
+                },
+
+                // unexpected status code
+                _ => return Err(FestiveError::Http)
+            }
+
+            println!("retrying");
         }
-
-        println!("retrying");
     }
-
     Ok(())
 }
