@@ -9,8 +9,9 @@ use std::{ fs::File, io::Read, path::PathBuf, collections::HashMap };
 pub enum FestiveError
 {
     EnvVar(&'static str),
-    Conversion,
-    Filesystem,
+    Init,
+    Conv,
+    File,
     Http,
     Parse
 }
@@ -35,23 +36,36 @@ fn main() -> FestiveResult<()>
     if status.is_none() { println!("no STATUS webhook provided") }
 
     // initiate the main loop
-    let client    = Client::new();
-    if let Err(e) = notify_cycle(&leaderboard, &session, notify.as_deref(), status.as_deref(), &client)
+    let client = Client::new();
+    if let Err(e) = notify_cycle(&leaderboard, &session, &notify, &status, &client)
     {
         // attempt to send STATUS message notifying about fatal error
         // ignore these results, as the program is already exiting
-        let _ = send_webhook(":information_source: Festive Bot experienced an unrecoverable error and is exiting! :sos:", status.as_deref(), &client);
-        let _ = send_webhook(&format!("Error: {e:?}"),                                                                    status.as_deref(), &client);
+        let _ = send_webhook(":warning: Festive Bot experienced an unrecoverable error, exiting!", &status, &client);
+        let _ = send_webhook(&format!("Error: {e:?}"),                                             &status, &client);
         return Err(e)
     }
     Ok(())
 }
 
-fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, status : Option<&str>, client : &Client) -> FestiveResult<()>
+fn notify_cycle(leaderboard : &str, session : &str, notify : &Option<String>, status : &Option<String>, client : &Client) -> FestiveResult<()>
 {
     // STATUS message notifying about initilisation
     println!("initialising cycle");
-    send_webhook(&format!(":information_source: Festive Bot v{} is initialising... :crab:", env!("CARGO_PKG_VERSION")), status, client)?;
+    send_webhook(&format!(":crab: Festive Bot v{} is initialising...", env!("CARGO_PKG_VERSION")), status, client)?;
+
+    // set handler for POSIX termination signals
+    // give hander owned clones of the resources it needs
+    println!("setting handler for SIGINT, SIGTERM, and SIGHUP signals");
+    let handler_status = status.clone();
+    let handler_client = client.clone();
+    ctrlc::set_handler(move ||
+    {
+        println!("received termination signal, exiting...");
+        let _ = send_webhook(":crab: Received termination signal, exiting! :wave:", &handler_status, &handler_client);
+        std::process::exit(0);
+    })
+    .map_err(|_| FestiveError::Init)?;
 
     // reusable buffers for efficiency
     let mut events = Vec::new();
@@ -62,15 +76,15 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
     let mut prev = Utc::now();
     let year     = prev.year();
     live.extend(2015 .. year);
-    if puzzle_unlock(year, 1)? <= prev { live.push(year) }
+    if puzzle_unlock(year, 1).map_err(|_| FestiveError::Init)? <= prev { live.push(year) }
 
     // send AoC API requests only once every 15 minutes
     // use truncated timestamps to ensure complete coverage despite measurement imprecision
     let delay = Duration::minutes(15);
-    prev      = prev.duration_trunc(delay).map_err(|_| FestiveError::Conversion)?;
+    prev      = prev.duration_trunc(delay).map_err(|_| FestiveError::Init)?;
 
     // STATUS message notifying about successful initialisation
-    send_webhook(&format!(":information_source: Initialisation successful; live years: {live:?}; monitoring leaderboard {leaderboard}... :crab:"), status, client)?;
+    send_webhook(&format!(":crab: Initialisation successful; live years: {live:?}; monitoring leaderboard {leaderboard}..."), status, client)?;
 
     loop
     {
@@ -85,11 +99,11 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
         println!();
 
         // send heartbeat STATUS message every three hours
-        let heartbeat = current.duration_trunc(Duration::hours(3)).map_err(|_| FestiveError::Conversion)?;
+        let heartbeat = current.duration_trunc(Duration::hours(3)).map_err(|_| FestiveError::Conv)?;
         if prev < heartbeat && heartbeat <= current
         {
             println!("sending {heartbeat} heartbeat");
-            send_webhook(&format!(":information_source: Heartbeat {heartbeat}: Festive Bot is still alive! :hearts:"), status, client)?;
+            send_webhook(&format!(":crab: Heartbeat {heartbeat}: Festive Bot is still alive! :heart:"), status, client)?;
         }
 
         // extend live years if one has commenced this iteration
@@ -97,7 +111,7 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
         if prev < start && start <= current && live.binary_search(&year).is_err()
         {
             live.push(year);
-            send_webhook(&format!(":information_source: Adding {year} to live years! :crab:"), status, client)?;
+            send_webhook(&format!(":crab: Adding {year} to live years..."), status, client)?;
         }
 
         for &year in &live
@@ -106,7 +120,7 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
             println!("sending AoC API request for year {year}");
             let response = request_events(year, leaderboard, session, client)?;
             println!("parsing response");
-            parse_events(&json::parse(&response).map_err(|_| FestiveError::Parse)?, &mut events)?;
+            parse_events(&response, &mut events)?;
             println!("parsed {} events", events.len());
 
             // read RFC 3339 timestamp from filesystem, defaulting to 28 days before current iteration
@@ -132,7 +146,7 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
                 send_webhook(&e.fmt()?, notify, client)?;
                 println!("updating timestamp to {}", e.timestamp);
 
-                std::fs::write(&timestamp_path, e.timestamp.to_rfc3339()).map_err(|_| FestiveError::Filesystem)?;
+                std::fs::write(&timestamp_path, e.timestamp.to_rfc3339()).map_err(|_| FestiveError::File)?;
             }
 
             // make announcements once per day during December
@@ -171,7 +185,7 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
 // additionally used for daily standings announcements on the 26th to 31st December
 fn puzzle_unlock(year : i32, day : u32) -> FestiveResult<DateTime<Utc>>
 {
-    Utc.with_ymd_and_hms(year, 12, day, 5, 0, 0).single().ok_or(FestiveError::Conversion)
+    Utc.with_ymd_and_hms(year, 12, day, 5, 0, 0).single().ok_or(FestiveError::Conv)
 }
 
 // puzzle completion events parsed from AoC API
@@ -199,7 +213,7 @@ impl Event
     // not using Display trait so FestiveResult can be returned
     fn fmt(&self) -> FestiveResult<String>
     {
-        let (puzzle, stars) = match self.star
+        let (part, stars) = match self.star
         {
             1 => ("one", ":star:"),
             2 => ("two", ":star: :star:"),
@@ -208,14 +222,14 @@ impl Event
 
         let score  = self.score()?;
         let plural = if score == num::one() { "" } else { "s" };
-        Ok(format!(":christmas_tree: [{}] {} has completed puzzle {puzzle} of day {:02}, scoring {score} point{plural}! {stars}", self.year, self.id.name, self.day))
+        Ok(format!(":christmas_tree: [{}] {} has completed puzzle {:02}, part {part}, scoring {score} point{plural}! {stars}", self.year, self.id.name, self.day))
     }
 
     // custom scoring based on the reciprocal of full days since the puzzle was released
     fn score(&self) -> FestiveResult<BigRational>
     {
         let days                = (self.timestamp - puzzle_unlock(self.year, self.day)?).num_days();
-        let ratio : BigRational = FromPrimitive::from_i64(1 + days).ok_or(FestiveError::Conversion)?;
+        let ratio : BigRational = FromPrimitive::from_i64(1 + days).ok_or(FestiveError::Conv)?;
         Ok(ratio.recip())
     }
 }
@@ -247,10 +261,13 @@ fn request_events(year : i32, leaderboard : &str, session : &str, client : &Clie
     }
 }
 
-fn parse_events(json : &JsonValue, events : &mut Vec<Event>) -> FestiveResult<()>
+fn parse_events(response : &str, events : &mut Vec<Event>) -> FestiveResult<()>
 {
-    events.clear();
+    // the response should be valid JSON
+    let json = json::parse(response).map_err(|_| FestiveError::Parse)?;
 
+    // iterate through the JSON, collating individual puzzle completion events
+    events.clear();
     for (id, member) in json["members"].entries()
     {
         let name = member["name"].to_string();
@@ -261,7 +278,7 @@ fn parse_events(json : &JsonValue, events : &mut Vec<Event>) -> FestiveResult<()
             {
                 events.push(Event
                 {
-                    timestamp: Utc.timestamp_opt(contents["get_star_ts"].as_i64().ok_or(FestiveError::Parse)?, 0).single().ok_or(FestiveError::Conversion)?,
+                    timestamp: Utc.timestamp_opt(contents["get_star_ts"].as_i64().ok_or(FestiveError::Parse)?, 0).single().ok_or(FestiveError::Conv)?,
                     year:      json["event"].to_string().parse().map_err(|_| FestiveError::Parse)?,
                     day:       day.parse().map_err(|_| FestiveError::Parse)?,
                     star:      star.parse().map_err(|_| FestiveError::Parse)?,
@@ -271,6 +288,7 @@ fn parse_events(json : &JsonValue, events : &mut Vec<Event>) -> FestiveResult<()
         }
     }
 
+    // events are sorted chronologically
     events.sort_unstable();
     Ok(())
 }
@@ -302,13 +320,13 @@ fn standings(events : &[Event]) -> FestiveResult<String>
     {
         standings.push_str(&format!("{}:", id.name));
         for _ in id.name.len() ..= max_name { standings.push(' ') }
-        standings.push_str(&format!("{:>5.02}", score.to_f64().ok_or(FestiveError::Conversion)?));
+        standings.push_str(&format!("{:>5.02}", score.to_f64().ok_or(FestiveError::Conv)?));
         standings.push('\n');
     }
     Ok(standings)
 }
 
-fn send_webhook(payload : &str, webhook : Option<&str>, client : &Client) -> FestiveResult<()>
+fn send_webhook(payload : &str, webhook : &Option<String>, client : &Client) -> FestiveResult<()>
 {
     println!("webhook: {:?}", payload);
 
