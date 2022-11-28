@@ -38,9 +38,10 @@ fn main() -> FestiveResult<()>
     let client    = Client::new();
     if let Err(e) = notify_cycle(&leaderboard, &session, notify.as_deref(), status.as_deref(), &client)
     {
-        // attempt to send STATUS message for fatal error
-        let _ = send_webhook(":warning: Festive Bot experienced an unrecoverable error and is exiting! :warning:", status.as_deref(), &client);
-        let _ = send_webhook(&format!("Error: {e:?}"),                                                             status.as_deref(), &client);
+        // attempt to send STATUS message notifying about fatal error
+        // ignore these results, as the program is already exiting
+        let _ = send_webhook(":information_source: Festive Bot experienced an unrecoverable error and is exiting! :sos:", status.as_deref(), &client);
+        let _ = send_webhook(&format!("Error: {e:?}"),                                                                    status.as_deref(), &client);
         return Err(e)
     }
     Ok(())
@@ -48,8 +49,11 @@ fn main() -> FestiveResult<()>
 
 fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, status : Option<&str>, client : &Client) -> FestiveResult<()>
 {
-    // reusable buffers for efficiency
+    // STATUS message notifying about initilisation
     println!("initialising cycle");
+    send_webhook(":information_source: Festive Bot is initialising... :crab:", status, client)?;
+
+    // reusable buffers for efficiency
     let mut events = Vec::new();
     let mut buffer = String::new();
 
@@ -64,6 +68,9 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
     // use truncated timestamps to ensure complete coverage despite measurement imprecision
     let delay = Duration::minutes(15);
     prev      = prev.duration_trunc(delay).map_err(|_| FestiveError::Conversion)?;
+
+    // STATUS message notifying about successful initialisation
+    send_webhook(&format!(":information_source: Initialisation successful; live years: {live:?}; moinitoring leaderboard {leaderboard}... :crab:"), status, client)?;
 
     loop
     {
@@ -87,7 +94,11 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
 
         // extend live years if one has commenced this iteration
         let start = puzzle_unlock(current.year(), 1)?;
-        if prev < start && start <= current { live.push(year) }
+        if prev < start && start <= current && live.binary_search(&year).is_err()
+        {
+            live.push(year);
+            send_webhook(&format!(":information_source: Adding {year} to live years! :crab:"), status, client)?;
+        }
 
         for &year in &live
         {
@@ -101,17 +112,21 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
             // read RFC 3339 timestamp from filesystem, defaulting to 28 days before current iteration
             let timestamp_path = PathBuf::from(format!("timestamp_{year}_{leaderboard}"));
             println!("reading {}", timestamp_path.display());
-            let timestamp      = File::open(&timestamp_path).ok().and_then(|mut f|
+            let timestamp = File::open(&timestamp_path).ok().and_then(|mut f|
             {
                 buffer.clear();
                 f.read_to_string(&mut buffer).ok()
                  .and_then(|_| DateTime::parse_from_rfc3339(buffer.trim()).ok())
                  .map(|dt| dt.with_timezone(&Utc))
             })
-            .unwrap_or_else(|| { println!("timestamp read failed, defaulting to 28 days ago"); current - Duration::days(28) });
+            .unwrap_or_else(||
+            {
+                println!("timestamp read failed, defaulting to 28 days ago");
+                current - Duration::days(28)
+            });
             println!("obtained timestamp {timestamp}");
 
-            // NOTIFY for each puzzle event that took place after the latest timestamp, up to the start of this iteration
+            // NOTIFY message for each puzzle event that took place after the latest timestamp, up to the start of this iteration
             for e in events.iter().skip_while(|e| e.timestamp <= timestamp).take_while(|e| e.timestamp < current)
             {
                 send_webhook(&e.fmt()?, notify, client)?;
@@ -127,21 +142,21 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
                 let puzzle = puzzle_unlock(year, day)?;
                 if prev < puzzle && puzzle <= current
                 {
-                    // NOTIFY about a new AoC year
+                    // NOTIFY message about a new AoC year
                     if day == 1
                     {
-                        send_webhook(&format!(":christmas_tree: [{year}] Advent of Code is now live! :christmas_tree:"), notify, client)?
+                        send_webhook(&format!(":christmas_tree: [{year}] Advent of Code is now live! :tada:"), notify, client)?
                     }
 
-                    // NOTIFY about new puzzles
+                    // NOTIFY message about new puzzles
                     if day <= 25
                     {
-                        send_webhook(&format!(":christmas_tree: [{year}] Puzzles for day {day:02} are now unlocked! :christmas_tree:"), notify, client)?;
+                        send_webhook(&format!(":christmas_tree: [{year}] Puzzles for day {day:02} have now unlocked! :unlock:"), notify, client)?;
                     }
 
-                    // NOTIFY current leaderboard standings
+                    // NOTIFY message current leaderboard standings
                     let standings = if events.is_empty() { "No scores yet: get programming!".to_string() } else { standings(&events)? };
-                    send_webhook(&format!(":christmas_tree: [{year}] Current Standings :christmas_tree:\n```{standings}```"), notify, client)?;
+                    send_webhook(&format!(":christmas_tree: [{year}] Current Standings: :trophy:\n```{standings}```"), notify, client)?;
                 }
             }
         }
