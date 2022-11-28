@@ -51,7 +51,7 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
 {
     // STATUS message notifying about initilisation
     println!("initialising cycle");
-    send_webhook(":information_source: Festive Bot is initialising... :crab:", status, client)?;
+    send_webhook(&format!(":information_source: Festive Bot v{} is initialising... :crab:", env!("CARGO_PKG_VERSION")), status, client)?;
 
     // reusable buffers for efficiency
     let mut events = Vec::new();
@@ -70,7 +70,7 @@ fn notify_cycle(leaderboard : &str, session : &str, notify : Option<&str>, statu
     prev      = prev.duration_trunc(delay).map_err(|_| FestiveError::Conversion)?;
 
     // STATUS message notifying about successful initialisation
-    send_webhook(&format!(":information_source: Initialisation successful; live years: {live:?}; moinitoring leaderboard {leaderboard}... :crab:"), status, client)?;
+    send_webhook(&format!(":information_source: Initialisation successful; live years: {live:?}; monitoring leaderboard {leaderboard}... :crab:"), status, client)?;
 
     loop
     {
