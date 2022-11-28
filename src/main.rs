@@ -4,8 +4,7 @@ use chrono::{ Utc, DateTime, Datelike, TimeZone, Duration, DurationRound };
 use num::{ FromPrimitive, ToPrimitive, rational::BigRational };
 use std::{ fs::File, io::Read, path::PathBuf, collections::HashMap };
 
-pub type FestiveResult<T> = Result<T, FestiveError>;
-
+// custom Error and Result types to unify errors from all sources
 #[derive(Debug)]
 pub enum FestiveError
 {
@@ -15,6 +14,7 @@ pub enum FestiveError
     Http,
     Parse
 }
+pub type FestiveResult<T> = Result<T, FestiveError>;
 
 fn main() -> FestiveResult<()>
 {
@@ -199,16 +199,16 @@ impl Event
     // not using Display trait so FestiveResult can be returned
     fn fmt(&self) -> FestiveResult<String>
     {
-        let (parts, stars) = match self.star
+        let (puzzle, stars) = match self.star
         {
-            1 => ("the first part", ":star:"),
-            2 => ("both parts",     ":star: :star:"),
+            1 => ("one", ":star:"),
+            2 => ("two", ":star: :star:"),
             _ => return Err(FestiveError::Parse)
         };
 
         let score  = self.score()?;
         let plural = if score == num::one() { "" } else { "s" };
-        Ok(format!(":christmas_tree: [{}] {} has completed {parts} of puzzle {:02}, scoring {score} point{plural}! {stars}", self.year, self.id.name, self.day))
+        Ok(format!(":christmas_tree: [{}] {} has completed puzzle {puzzle} of day {:02}, scoring {score} point{plural}! {stars}", self.year, self.id.name, self.day))
     }
 
     // custom scoring based on the reciprocal of full days since the puzzle was released
