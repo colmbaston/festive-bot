@@ -124,12 +124,12 @@ fn notify_cycle(leaderboard : &str, session : &str, client : &Client) -> Festive
             println!("obtained timestamp {timestamp}");
 
             // NOTIFY message for each puzzle event that took place after the latest timestamp, up to the start of this iteration
-            for e in events.iter().skip_while(|e| e.timestamp <= timestamp).take_while(|e| e.timestamp < current)
+            for e in events.iter().skip_while(|e| e.timestamp() <= &timestamp).take_while(|e| e.timestamp() < &current)
             {
                 Webhook::send(&e.fmt()?, Webhook::Notify, client)?;
-                println!("updating timestamp to {}", e.timestamp);
+                println!("updating timestamp to {}", e.timestamp());
 
-                std::fs::write(&timestamp_path, e.timestamp.to_rfc3339()).map_err(|_| FestiveError::File)?;
+                std::fs::write(&timestamp_path, e.timestamp().to_rfc3339()).map_err(|_| FestiveError::File)?;
             }
 
             // make announcements once per day during December
@@ -145,13 +145,13 @@ fn notify_cycle(leaderboard : &str, session : &str, client : &Client) -> Festive
                         Webhook::send(&format!(":christmas_tree: [{year}] Advent of Code is now live! :tada:"), Webhook::Notify, client)?
                     }
 
-                    // NOTIFY message about new puzzles
+                    // NOTIFY message about new puzzle
                     if day <= 25
                     {
                         Webhook::send(&format!(":christmas_tree: [{year}] Puzzle {day:02} is now unlocked! :unlock:"), Webhook::Notify, client)?;
                     }
 
-                    // NOTIFY message current leaderboard standings
+                    // NOTIFY message with current leaderboard standings
                     let standings = if events.is_empty() { "No scores yet: get programming!".to_string() } else { Event::standings(&events)? };
                     Webhook::send(&format!(":christmas_tree: [{year}] Current Standings: :trophy:\n```{standings}```"), Webhook::Notify, client)?;
                 }
