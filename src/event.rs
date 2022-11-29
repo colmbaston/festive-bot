@@ -9,11 +9,11 @@ use crate::error::{ FestiveResult, FestiveError };
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct Event
 {
-    pub timestamp: DateTime<Utc>,
-    year:          i32,
-    day:           u32,
-    star:          u8,
-    id:            Identifier
+    timestamp: DateTime<Utc>,
+    year:      i32,
+    day:       u32,
+    star:      u8,
+    id:        Identifier
 }
 
 // unique identifier for participant on this leaderboard
@@ -26,6 +26,11 @@ struct Identifier
 
 impl Event
 {
+    pub fn timestamp(&self) -> &DateTime<Utc>
+    {
+        &self.timestamp
+    }
+
     // not using Display trait so FestiveResult can be returned
     pub fn fmt(&self) -> FestiveResult<String>
     {
