@@ -9,8 +9,9 @@ The environment variables `FESTIVE_BOT_LEADERBOARD` and `FESTIVE_BOT_SESSION` mu
 These are the ID of the private leaderboard to monitor, and a session cooike for an AoC account that has access to that leaderboard.
 
 Optionally, environment variables `FESTIVE_BOT_NOTIFY` and `FESTIVE_BOT_STATUS` may also be provided.
-These are HTTP URLs for webhooks, defining where puzzle event notifications and messages about Festive Bot's status (including unrecoverable errors), repectively, are sent.
+These are HTTP URLs for webhooks, defining where puzzle event notifications and messages about the bot's status (including unrecoverable errors), repectively, are sent.
 Both variables may contain the same URL, and if unset, no HTTP requests will be sent for the corresponding variable.
+These variables may be modified while the bot is running as they are fetched anew each time a webhook HTTP request is sent.
 
 Per-year, per-leaderboard timestamp files (`timestamp_2015_123456` for year 2015 and leaderboard ID 123456) will will be written to the working directory.
 Puzzle events which occurred before this timestamp won't be reported.
