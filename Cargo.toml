@@ -1,9 +1,12 @@
 [package]
-name = "festive-bot"
-version = "1.0.3"
-edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+name        = "festive-bot"
+version     = "1.0.3"
+authors     = ["Colm Baston"]
+edition     = "2021"
+description = "A bot to track events occurring on a private Advent of Code leaderboard."
+repository  = "https://gitlab.com/colmbaston/festive-bot/"
+readme      = "README.md"
+license     = "MIT"
 
 [dependencies]
 chrono   = "0.4"
