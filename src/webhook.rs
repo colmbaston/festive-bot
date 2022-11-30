@@ -10,13 +10,10 @@ impl Webhook
     // the environment variable associated with this webhook
     fn env_var(&self) -> &'static str
     {
-        const NOTIFY : &str = "FESTIVE_BOT_NOTIFY";
-        const STATUS : &str = "FESTIVE_BOT_STATUS";
-
         match self
         {
-            Webhook::Notify => NOTIFY,
-            Webhook::Status => STATUS
+            Webhook::Notify => "FESTIVE_BOT_NOTIFY",
+            Webhook::Status => "FESTIVE_BOT_STATUS"
         }
     }
 
