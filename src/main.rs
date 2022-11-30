@@ -13,15 +13,18 @@ use webhook::Webhook;
 
 fn main() -> FestiveResult<()>
 {
-    // get mandatory environment variables
+    // fetch mandatory environment variables
     const LEADERBOARD : &str = "FESTIVE_BOT_LEADERBOARD";
     const SESSION     : &str = "FESTIVE_BOT_SESSION";
     let leaderboard = std::env::var(LEADERBOARD).map_err(|_| FestiveError::EnvVar(LEADERBOARD))?;
     let session     = std::env::var(SESSION).map_err(|_|     FestiveError::EnvVar(SESSION))?;
 
+    // fetch command-line args
+    let current_year_only = std::env::args().any(|s| s == "--current-year-only");
+
     // initiate the main loop
     let client = Client::new();
-    if let Err(e) = notify_cycle(&leaderboard, &session, &client)
+    if let Err(e) = notify_cycle(&leaderboard, &session, current_year_only, &client)
     {
         // attempt to send STATUS message notifying about fatal error
         // ignore these results, as the program is already exiting
@@ -32,7 +35,7 @@ fn main() -> FestiveResult<()>
     Ok(())
 }
 
-fn notify_cycle(leaderboard : &str, session : &str, client : &Client) -> FestiveResult<()>
+fn notify_cycle(leaderboard : &str, session : &str, current_year_only : bool, client : &Client) -> FestiveResult<()>
 {
     // STATUS message notifying about initilisation
     println!("initialising cycle");
@@ -57,7 +60,7 @@ fn notify_cycle(leaderboard : &str, session : &str, client : &Client) -> Festive
     // populate currently-live AoC years
     let mut live = Vec::new();
     let mut prev = Utc::now();
-    let year     = prev.year();
+    let mut year = prev.year();
     live.extend(2015 .. year);
     if Event::puzzle_unlock(year, 1).map_err(|_| FestiveError::Init)? <= prev { live.push(year) }
 
@@ -67,12 +70,16 @@ fn notify_cycle(leaderboard : &str, session : &str, client : &Client) -> Festive
     prev      = prev.duration_trunc(delay).map_err(|_| FestiveError::Init)?;
 
     // STATUS message notifying about successful initialisation
-    Webhook::send(&format!(":crab: Initialisation successful; live years: {live:?}; monitoring leaderboard {leaderboard}..."), Webhook::Status, client)?;
+    Webhook::send(&format!(":crab: Initialisation successful!\n\
+                            :crab: Live AoC years: {live:?}\n\
+                            :crab: Current year only: {current_year_only}\n\
+                            :crab: Monitoring leaderboard {leaderboard}..."), Webhook::Status, client)?;
 
     loop
     {
         // attempt to sleep until next iteration
         let current = prev + delay;
+        year        = current.year();
         println!("attempting to sleep until {current}");
         match (current - Utc::now()).to_std()
         {
@@ -90,24 +97,24 @@ fn notify_cycle(leaderboard : &str, session : &str, client : &Client) -> Festive
         }
 
         // extend live years if one has commenced this iteration
-        let start = Event::puzzle_unlock(current.year(), 1)?;
+        let start = Event::puzzle_unlock(year, 1)?;
         if prev < start && start <= current && live.binary_search(&year).is_err()
         {
             live.push(year);
             Webhook::send(&format!(":crab: Adding {year} to live years..."), Webhook::Status, client)?;
         }
 
-        for &year in &live
+        for &request_year in live.iter().filter(|&y| !current_year_only || y == &year)
         {
             // send AoC API request, parsing the response to a vector of events
-            println!("sending AoC API request for year {year}");
-            let response = Event::request(year, leaderboard, session, client)?;
+            println!("sending AoC API request for year {request_year}");
+            let response = Event::request(request_year, leaderboard, session, client)?;
             println!("parsing response");
             Event::parse(&response, &mut events)?;
             println!("parsed {} events", events.len());
 
             // read RFC 3339 timestamp from filesystem, defaulting to 28 days before current iteration
-            let timestamp_path = PathBuf::from(format!("timestamp_{year}_{leaderboard}"));
+            let timestamp_path = PathBuf::from(format!("timestamp_{request_year}_{leaderboard}"));
             println!("reading {}", timestamp_path.display());
             let timestamp = File::open(&timestamp_path).ok().and_then(|mut f|
             {
@@ -133,7 +140,8 @@ fn notify_cycle(leaderboard : &str, session : &str, client : &Client) -> Festive
             }
 
             // make announcements once per day during December
-            if current.year() == year && current.month() == 12
+            const DECEMBER : u32 = 12;
+            if request_year == year && current.month() == DECEMBER
             {
                 let day    = current.day();
                 let puzzle = Event::puzzle_unlock(year, day)?;
