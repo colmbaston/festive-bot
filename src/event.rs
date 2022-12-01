@@ -16,7 +16,7 @@ pub struct Event
     id:        Identifier
 }
 
-// unique identifier for participant on this leaderboard
+// unique identifier for a participant on this leaderboard
 #[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Identifier
 {
