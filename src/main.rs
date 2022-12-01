@@ -101,7 +101,7 @@ fn notify_cycle(leaderboard : &str, session : &str, current_year_only : bool, cl
         if prev < start && start <= current && live.binary_search(&year).is_err()
         {
             live.push(year);
-            Webhook::send(&format!(":crab: Adding {year} to live years..."), Webhook::Status, client)?;
+            Webhook::send(&format!(":crab: Adding {year} to live years!"), Webhook::Status, client)?;
         }
 
         for &request_year in live.iter().filter(|&y| !current_year_only || y == &year)
@@ -161,7 +161,7 @@ fn notify_cycle(leaderboard : &str, session : &str, current_year_only : bool, cl
 
                     // NOTIFY message with current leaderboard standings
                     let standings = if events.is_empty() { "No scores yet: get programming!".to_string() } else { Event::standings(&events)? };
-                    Webhook::send(&format!(":christmas_tree: [{year}] Current Standings: :trophy:\n```{standings}```"), Webhook::Notify, client)?;
+                    Webhook::send(&format!(":christmas_tree: [{year}] Current Standings :trophy:\n```{standings}```"), Webhook::Notify, client)?;
                 }
             }
         }
