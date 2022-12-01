@@ -1,3 +1,5 @@
+#![feature(slice_group_by)]
+
 use std::{ fs::File, io::Read, path::PathBuf };
 use chrono::{ Utc, DateTime, Datelike, Duration, DurationRound };
 use reqwest::blocking::Client;
@@ -20,7 +22,7 @@ fn main() -> FestiveResult<()>
     let session     = std::env::var(SESSION).map_err(|_|     FestiveError::EnvVar(SESSION))?;
 
     // fetch command-line args
-    let current_year_only = std::env::args().any(|s| s == "--current-year-only");
+    let current_year_only = std::env::args().any(|arg| arg == "--current-year-only");
 
     // HTTP client with appropriate User-Agent header
     const USER_AGENT : &str = "Festive Bot by colm@colmbaston.uk (https://crates.io/crates/festive-bot)";
@@ -44,8 +46,7 @@ fn notify_cycle(leaderboard : &str, session : &str, current_year_only : bool, cl
 {
     // STATUS message notifying about initilisation
     println!("initialising");
-
-    Webhook::send(&format!(":crab: Festive Bot v{} is initialising", env!("CARGO_PKG_VERSION")), Webhook::Status, client)?;
+    Webhook::send(&format!(":crab: Festive Bot v{} is initialising...", env!("CARGO_PKG_VERSION")), Webhook::Status, client)?;
 
     // set handler for POSIX termination signals
     // hander needs to own the HTTP client it uses, so give it a clone
@@ -80,7 +81,7 @@ fn notify_cycle(leaderboard : &str, session : &str, current_year_only : bool, cl
     Webhook::send(&format!(":crab: Initialisation successful!\n\
                             :crab: Live AoC years: {live:?}\n\
                             :crab: Current year only: {current_year_only}\n\
-                            :crab: Monitoring leaderboard {leaderboard}..."), Webhook::Status, client)?;
+                            :crab: Monitoring leaderboard {leaderboard}... :eyes:"), Webhook::Status, client)?;
     println!("initialisation succeeded at {}", Utc::now());
 
     loop

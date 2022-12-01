@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{ collections::HashMap, fmt::Write };
 use chrono::{ DateTime, Utc, TimeZone };
 use reqwest::{ blocking::Client, StatusCode };
 use num::{ FromPrimitive, ToPrimitive, rational::BigRational };
@@ -6,7 +6,7 @@ use crate::error::{ FestiveResult, FestiveError };
 
 // puzzle completion events parsed from AoC API
 // year and day fields match corresponding components of DateTime<Utc>
-#[derive(PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Event
 {
     timestamp: DateTime<Utc>,
@@ -17,7 +17,7 @@ pub struct Event
 }
 
 // unique identifier for a participant on this leaderboard
-#[derive(PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct Identifier
 {
     name:    String,
@@ -129,22 +129,45 @@ impl Event
             *hist.entry(&e.id).or_insert_with(num::zero) += e.score()?;
         }
 
-        // sort by score descending, then by Identifier ascending
+        // sort by score descending, then by Identifier ascending, and group distinct scores
         let mut scores = hist.into_iter().collect::<Vec<_>>();
         scores.sort_unstable_by_key(|(id, score)| (-score, *id));
+        let distinct = scores.group_by(|a, b| a.1 == b.1).collect::<Vec<_>>();
 
-        // calculate maximum-length name for space padding
-        let max_name = scores.iter().map(|(id, _)| id.name.len()).max().unwrap_or(0);
+        // calculate width for positions
+        // the width of the maximum position to be displayed, plus one for ')'
+        let width_pos = 2 + (1 + distinct.iter()
+                                         .rev()
+                                         .skip(1)
+                                         .map(|grp| grp.len())
+                                         .sum::<usize>()).ilog10() as usize;
+
+        // calculate width for names
+        // the length of the longest name, plus one for ':'
+        let width_name = 1 + scores.iter()
+                                   .map(|(id, _)| id.name.len()).max()
+                                   .unwrap_or(0);
+
+        // calculate width for scores
+        // the width of the maximum score, formatted to two decimal places
+        let width_score = scores.iter()
+                                .map(|(_,  s)| s)
+                                .max()
+                                .map(|s| 4 + s.to_f64().unwrap_or(0.0).log10().floor() as usize)
+                                .unwrap_or(0);
 
         // generate standings report, with one line per participant
-        let mut standings = String::new();
-        for (id, score) in scores
+        let mut report = String::new();
+        for (pos, grp) in distinct.into_iter().scan(1, |pos, grp| { let old = *pos; *pos += grp.len(); Some((old, grp)) })
         {
-            standings.push_str(&format!("{}:", id.name));
-            for _ in id.name.len() ..= max_name { standings.push(' ') }
-            standings.push_str(&format!("{:>5.02}", score.to_f64().ok_or(FestiveError::Conv)?));
-            standings.push('\n');
+            for (ix, (id, score)) in grp.iter().enumerate()
+            {
+                writeln!(&mut report, "{:>width_pos$} {:<width_name$} {:>width_score$.02}",
+                                      if ix == 0 { format!("{pos})") } else { String::new() },
+                                      format!("{}:", id.name),
+                                      score.to_f64().unwrap()).map_err(|_| FestiveError::Conv)?;
+            }
         }
-        Ok(standings)
+        Ok(report)
     }
 }
