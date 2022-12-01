@@ -22,8 +22,13 @@ fn main() -> FestiveResult<()>
     // fetch command-line args
     let current_year_only = std::env::args().any(|s| s == "--current-year-only");
 
+    // HTTP client with appropriate User-Agent header
+    const USER_AGENT : &str = "Festive Bot by colm@colmbaston.uk (https://crates.io/crates/festive-bot)";
+    let client = Client::builder().user_agent(USER_AGENT)
+                                  .build()
+                                  .map_err(|_| FestiveError::Init)?;
+
     // initiate the main loop
-    let client = Client::new();
     if let Err(e) = notify_cycle(&leaderboard, &session, current_year_only, &client)
     {
         // attempt to send STATUS message notifying about fatal error
@@ -38,8 +43,9 @@ fn main() -> FestiveResult<()>
 fn notify_cycle(leaderboard : &str, session : &str, current_year_only : bool, client : &Client) -> FestiveResult<()>
 {
     // STATUS message notifying about initilisation
-    println!("initialising cycle");
-    Webhook::send(&format!(":crab: Festive Bot v{} is initialising...", env!("CARGO_PKG_VERSION")), Webhook::Status, client)?;
+    println!("initialising");
+
+    Webhook::send(&format!(":crab: Festive Bot v{} is initialising", env!("CARGO_PKG_VERSION")), Webhook::Status, client)?;
 
     // set handler for POSIX termination signals
     // hander needs to own the HTTP client it uses, so give it a clone
@@ -53,11 +59,8 @@ fn notify_cycle(leaderboard : &str, session : &str, current_year_only : bool, cl
     })
     .map_err(|_| FestiveError::Init)?;
 
-    // reusable buffers for efficiency
-    let mut events = Vec::new();
-    let mut buffer = String::new();
-
     // populate currently-live AoC years
+    println!("determining currently-live AoC years");
     let mut live = Vec::new();
     let mut prev = Utc::now();
     let mut year = prev.year();
@@ -69,11 +72,16 @@ fn notify_cycle(leaderboard : &str, session : &str, current_year_only : bool, cl
     let delay = Duration::minutes(15);
     prev      = prev.duration_trunc(delay).map_err(|_| FestiveError::Init)?;
 
-    // STATUS message notifying about successful initialisation
+    // reusable buffers for efficiency
+    let mut events = Vec::new();
+    let mut buffer = String::new();
+
+    // initialisation was successful
     Webhook::send(&format!(":crab: Initialisation successful!\n\
                             :crab: Live AoC years: {live:?}\n\
                             :crab: Current year only: {current_year_only}\n\
                             :crab: Monitoring leaderboard {leaderboard}..."), Webhook::Status, client)?;
+    println!("initialisation succeeded at {}", Utc::now());
 
     loop
     {

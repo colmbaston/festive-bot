@@ -66,7 +66,7 @@ impl Event
         let url = format!("https://adventofcode.com/{year}/leaderboard/private/view/{leaderboard}.json");
 
         // send HTTP request
-        let response = client.get(&url)
+        let response = client.get(url)
                              .header("cookie", format!("session={session}"))
                              .send()
                              .map_err(|_| FestiveError::Http)?;
