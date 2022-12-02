@@ -1,7 +1,10 @@
 # Festive Bot
 
 A bot to track events occurring on a private Advent of Code (AoC) leaderboard, written in Rust.
-The bot reads the leaderboard data from https://adventofcode.com, parses the puzzle completion events, and pushes updates that occur using a webhook, for example to announce them in a Discord server.
+The bot reads the leaderboard data from https://adventofcode.com, parses the puzzle completion events, and pushes updates that occur using a webhook.
+
+The webhook HTTP requests conform to Discord's webhook API, and this is the only service the bot is verified to support.
+Other services' webhook APIs may be (partially) compatible, but I give no guarantees.
 
 ## Usage
 
