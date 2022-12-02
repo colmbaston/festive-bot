@@ -1,4 +1,5 @@
 use std::{ collections::HashMap, fmt::Write };
+use json::JsonValue;
 use chrono::{ DateTime, Utc, TimeZone };
 use reqwest::{ blocking::Client, StatusCode };
 use num::{ FromPrimitive, ToPrimitive, rational::BigRational };
@@ -97,7 +98,14 @@ impl Event
         events.clear();
         for (id, member) in json["members"].entries()
         {
-            let name = member["name"].to_string();
+            let name = match &member["name"]
+            {
+                // anonymous users appear with null names in the AoC API
+                JsonValue::Null         => format!("anonymous user #{id}"),
+                JsonValue::Short(name)  => name.to_string(),
+                JsonValue::String(name) => name.clone(),
+                _                       => return Err(FestiveError::Parse)
+            };
 
             for (day, stars) in member["completion_day_level"].entries()
             {
