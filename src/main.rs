@@ -5,7 +5,7 @@ use chrono::{ Utc, DateTime, Datelike, Duration, DurationRound };
 use reqwest::blocking::Client;
 
 mod error;
-use error::{ FestiveError, FestiveResult };
+use error::{ FestiveError, FestiveResult, EnvVar };
 
 mod event;
 use event::Event;
@@ -15,21 +15,31 @@ use webhook::Webhook;
 
 fn main() -> FestiveResult<()>
 {
-    // fetch mandatory environment variables
-    const LEADERBOARD : &str = "FESTIVE_BOT_LEADERBOARD";
-    const SESSION     : &str = "FESTIVE_BOT_SESSION";
-    let leaderboard = std::env::var(LEADERBOARD).map_err(|_| FestiveError::EnvVar(LEADERBOARD))?;
-    let session     = std::env::var(SESSION).map_err(|_|     FestiveError::EnvVar(SESSION))?;
+    // mandatory environment variables
+    let leaderboard = EnvVar::Leaderboard.get()?;
+    let session     = EnvVar::Session.get()?;
 
-    // fetch command-line args
-    let current_year_only = std::env::args().any(|arg| arg == "--current-year-only");
+    // parse command-line args
+    let mut all_years = false;
+    let mut heartbeat = false;
+    let mut args      = std::env::args();
+    let prog          = args.next().unwrap_or_else(|| "festive-bot".to_string());
+    for arg in args
+    {
+        match arg.as_str()
+        {
+            "--all-years" => all_years = true,
+            "--heartbeat" => heartbeat = true,
+            _             => { println!("usage: {prog} [--all-years] [--heartbeat]"); return Err(FestiveError::Arg) }
+        }
+    }
 
-    // HTTP client with appropriate User-Agent header
+    // HTTP client with appropriate user agent
     let client = Client::builder().user_agent(format!("Festive Bot v{}; https://crates.io/festive-bot; colm@colmbaston.uk", env!("CARGO_PKG_VERSION")))
                                   .build().map_err(|_| FestiveError::Init)?;
 
     // initiate the main loop
-    if let Err(e) = notify_cycle(&leaderboard, &session, current_year_only, &client)
+    if let Err(e) = notify_cycle(&leaderboard, &session, &client, all_years, heartbeat)
     {
         // attempt to send STATUS message notifying about fatal error
         // ignore these results, as the program is already exiting
@@ -40,7 +50,7 @@ fn main() -> FestiveResult<()>
     Ok(())
 }
 
-fn notify_cycle(leaderboard : &str, session : &str, current_year_only : bool, client : &Client) -> FestiveResult<()>
+fn notify_cycle(leaderboard : &str, session : &str, client : &Client, all_years : bool, heartbeat : bool) -> FestiveResult<()>
 {
     // STATUS message notifying about initilisation
     println!("initialising");
@@ -76,7 +86,7 @@ fn notify_cycle(leaderboard : &str, session : &str, current_year_only : bool, cl
     let mut buffer = String::new();
 
     println!("initialisation successful");
-    Webhook::send(":crab: Initialisation successful! Monitoring leaderboard {leaderboard}... :eyes:", &[], Webhook::Status, client)?;
+    Webhook::send(&format!(":crab: Initialisation successful! Monitoring leaderboard {leaderboard}... :eyes:"), &[], Webhook::Status, client)?;
 
     loop
     {
@@ -91,23 +101,26 @@ fn notify_cycle(leaderboard : &str, session : &str, current_year_only : bool, cl
         }
         println!();
 
-        // send heartbeat STATUS message every three hours
-        let heartbeat = current.duration_trunc(Duration::hours(3)).map_err(|_| FestiveError::Conv)?;
-        if prev < heartbeat && heartbeat <= current
+        // send heartbeat STATUS message every hour
+        if heartbeat
         {
-            println!("sending {heartbeat} heartbeat");
-            Webhook::send(&format!(":crab: Heartbeat {heartbeat}: Festive Bot is still alive! :heart:"), &[], Webhook::Status, client)?;
+            let heartbeat_timestamp = current.duration_trunc(Duration::hours(1)).map_err(|_| FestiveError::Conv)?;
+            if prev < heartbeat_timestamp && heartbeat_timestamp <= current
+            {
+                Webhook::send(&format!(":crab: Heartbeat {heartbeat_timestamp} :heart:"), &[], Webhook::Status, client)?;
+            }
         }
 
         // extend live years if one has commenced this iteration
-        let start = Event::puzzle_unlock(year, 1)?;
-        if prev < start && start <= current && live.binary_search(&year).is_err()
+        let start_timestamp = Event::puzzle_unlock(year, 1)?;
+        if prev < start_timestamp && start_timestamp <= current && live.binary_search(&year).is_err()
         {
             live.push(year);
             Webhook::send(&format!(":crab: Adding {year} to live years!"), &[], Webhook::Status, client)?;
         }
 
-        for &request_year in live.iter().filter(|&y| !current_year_only || y == &year)
+        // only report on past years when all_years is set
+        for &request_year in live.iter().filter(|&y| all_years || y == &year)
         {
             // send AoC API request, parsing the response to a vector of events
             println!("sending AoC API request for year {request_year}");
@@ -145,9 +158,9 @@ fn notify_cycle(leaderboard : &str, session : &str, current_year_only : bool, cl
             // make announcements once per day during December
             if request_year == year && current.month() == 12
             {
-                let day    = current.day();
-                let puzzle = Event::puzzle_unlock(year, day)?;
-                if prev < puzzle && puzzle <= current
+                let day              = current.day();
+                let puzzle_timestamp = Event::puzzle_unlock(year, day)?;
+                if prev < puzzle_timestamp && puzzle_timestamp <= current
                 {
                     // NOTIFY message about a new AoC year
                     if day == 1
