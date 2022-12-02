@@ -41,7 +41,7 @@ fn main() -> FestiveResult<()>
     // initiate the main loop
     if let Err(e) = notify_cycle(&leaderboard, &session, &client, all_years, heartbeat)
     {
-        // attempt to send STATUS message notifying about fatal error
+        // attempt to send status message about fatal error
         // ignore these results, as the program is already exiting
         let _ = Webhook::send(":warning: Festive Bot experienced an unrecoverable error, exiting!", &[], Webhook::Status, &client);
         let _ = Webhook::send(&format!(":warning: Error: {e:?}"),                                   &[], Webhook::Status, &client);
@@ -52,7 +52,7 @@ fn main() -> FestiveResult<()>
 
 fn notify_cycle(leaderboard : &str, session : &str, client : &Client, all_years : bool, heartbeat : bool) -> FestiveResult<()>
 {
-    // STATUS message notifying about initilisation
+    // status message notifying about initilisation
     println!("initialising");
     Webhook::send(&format!(":crab: Festive Bot v{} is initialising...", env!("CARGO_PKG_VERSION")), &[], Webhook::Status, client)?;
 
@@ -101,19 +101,21 @@ fn notify_cycle(leaderboard : &str, session : &str, client : &Client, all_years 
         }
         println!();
 
-        // send heartbeat STATUS message every hour
+        // if a timestamp has occurred since the previous iteration, it can trigger something to happen this iteration
+        let trigger = |timestamp| prev < timestamp && timestamp <= current;
+
+        // send status message every hour when heartbeat is set
         if heartbeat
         {
             let heartbeat_timestamp = current.duration_trunc(Duration::hours(1)).map_err(|_| FestiveError::Conv)?;
-            if prev < heartbeat_timestamp && heartbeat_timestamp <= current
+            if trigger(heartbeat_timestamp)
             {
                 Webhook::send(&format!(":crab: Heartbeat {heartbeat_timestamp} :heart:"), &[], Webhook::Status, client)?;
             }
         }
 
-        // extend live years if one has commenced this iteration
-        let start_timestamp = Event::puzzle_unlock(year, 1)?;
-        if prev < start_timestamp && start_timestamp <= current && live.binary_search(&year).is_err()
+        // extend live years if puzzle one of this year has unlocked
+        if trigger(Event::puzzle_unlock(year, 1)?) && live.binary_search(&year).is_err()
         {
             live.push(year);
             Webhook::send(&format!(":crab: Adding {year} to live years!"), &[], Webhook::Status, client)?;
@@ -146,37 +148,35 @@ fn notify_cycle(leaderboard : &str, session : &str, client : &Client, all_years 
             });
             println!("obtained timestamp {timestamp}");
 
-            // NOTIFY message for each puzzle event that took place after the latest timestamp, up to the start of this iteration
+            // message for each puzzle event that took place after the latest timestamp, up to the start of this iteration
             for e in events.iter().skip_while(|e| e.timestamp() <= &timestamp).take_while(|e| e.timestamp() < &current)
             {
                 Webhook::send(&e.fmt()?, &[], Webhook::Notify, client)?;
                 println!("updating timestamp to {}", e.timestamp());
-
                 std::fs::write(&timestamp_path, e.timestamp().to_rfc3339()).map_err(|_| FestiveError::File)?;
             }
 
             // make announcements once per day during December
             if request_year == year && current.month() == 12
             {
-                let day              = current.day();
-                let puzzle_timestamp = Event::puzzle_unlock(year, day)?;
-                if prev < puzzle_timestamp && puzzle_timestamp <= current
+                let day = current.day();
+                if trigger(Event::puzzle_unlock(year, day)?)
                 {
-                    // NOTIFY message about a new AoC year
+                    // message about a new AoC year
                     if day == 1
                     {
                         Webhook::send(&format!(":christmas_tree: [{year}] Advent of Code is now live! :tada:"), &[], Webhook::Notify, client)?
                     }
 
-                    // NOTIFY message about new puzzle
+                    // message about new puzzle
                     if day <= 25
                     {
                         Webhook::send(&format!(":christmas_tree: [{year}] Puzzle {day:02} is now unlocked! :unlock:"), &[], Webhook::Notify, client)?;
                     }
 
-                    // NOTIFY message with current leaderboard standings
+                    // message with current leaderboard standings
                     let standings = if events.is_empty() { "No scores yet: get programming!\n".to_string() } else { Event::standings(&events)? };
-                    Webhook::send(&format!(":christmas_tree: [{year}] Current Standings :trophy:"), &[(&format!("standings_{year}_12_{day}.txt"), standings.as_bytes())], Webhook::Notify, client)?;
+                    Webhook::send(&format!(":christmas_tree: [{year}] Current Standings :trophy:"), &[(&format!("standings_{year}_12_{day:02}.txt"), standings.as_bytes())], Webhook::Notify, client)?;
                 }
             }
         }
