@@ -1,33 +1,34 @@
 use reqwest::{ blocking::{ Client, multipart::{ Form, Part }}, StatusCode };
-use crate::error::{ FestiveResult, FestiveError };
+use crate::error::{ FestiveResult, FestiveError, EnvVar };
 
 // handles for webhook URLs
-#[derive(Clone, Copy, Debug)]
+#[derive(Debug)]
 pub enum Webhook { Notify, Status }
 
 impl Webhook
 {
-    // the environment variable associated with this webhook
-    fn env_var(&self) -> &'static str
+    // attempt to get this webhook's URL
+    fn url(&self) -> FestiveResult<String>
     {
         match self
         {
-            Webhook::Notify => "FESTIVE_BOT_NOTIFY",
-            Webhook::Status => "FESTIVE_BOT_STATUS"
+            Webhook::Notify => EnvVar::Notify,
+            Webhook::Status => EnvVar::Status
         }
+        .get()
     }
 
     // written for Discord's webhook API
     // may work partially for other services, but only verified for Discord
     pub fn send(content : &str, files : &[(&str, &[u8])], webhook : Webhook, client : &Client) -> FestiveResult<()>
     {
-        println!("webhook content:    {content:?}");
+        println!("webhook content: {content:?}");
         println!("webhook file count: {}", files.len());
 
         // only send HTTP request if webhook variable set
-        match &std::env::var(webhook.env_var())
+        match webhook.url().as_deref()
         {
-            Err(_)  => println!("webhook variable {} fetch failed, not sending request", webhook.env_var()),
+            Err(_)  => println!("webhook {webhook:?} environment variable not present, not sending request"),
             Ok(url) =>
             {
                 println!("webhook URL: {url}");
