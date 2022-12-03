@@ -1,5 +1,5 @@
 use reqwest::{ blocking::{ Client, multipart::{ Form, Part }}, StatusCode };
-use crate::error::{ FestiveResult, FestiveError, EnvVar };
+use crate::{ env::Var, error::{ FestiveResult, FestiveError }};
 
 // handles for webhook URLs
 #[derive(Debug)]
@@ -12,8 +12,8 @@ impl Webhook
     {
         match self
         {
-            Webhook::Notify => EnvVar::Notify,
-            Webhook::Status => EnvVar::Status
+            Webhook::Notify => Var::Notify,
+            Webhook::Status => Var::Status
         }
         .get()
     }
