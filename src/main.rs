@@ -5,7 +5,10 @@ use chrono::{ Utc, DateTime, Datelike, Duration, DurationRound };
 use reqwest::blocking::Client;
 
 mod error;
-use error::{ FestiveError, FestiveResult, EnvVar };
+use error::{ FestiveError, FestiveResult };
+
+mod env;
+use env::{ Var, Args };
 
 mod event;
 use event::Event;
@@ -16,30 +19,18 @@ use webhook::Webhook;
 fn main() -> FestiveResult<()>
 {
     // mandatory environment variables
-    let leaderboard = EnvVar::Leaderboard.get()?;
-    let session     = EnvVar::Session.get()?;
+    let leaderboard = Var::Leaderboard.get()?;
+    let session     = Var::Session.get()?;
 
-    // parse command-line args
-    let mut all_years = false;
-    let mut heartbeat = false;
-    let mut args      = std::env::args();
-    let prog          = args.next().unwrap_or_else(|| "festive-bot".to_string());
-    for arg in args
-    {
-        match arg.as_str()
-        {
-            "--all-years" => all_years = true,
-            "--heartbeat" => heartbeat = true,
-            _             => { println!("usage: {prog} [--all-years] [--heartbeat]"); return Err(FestiveError::Arg) }
-        }
-    }
+    // parse command-line arguments
+    let args = Args::parse();
 
     // HTTP client with appropriate user agent
     let client = Client::builder().user_agent(format!("Festive Bot v{}; https://crates.io/festive-bot; colm@colmbaston.uk", env!("CARGO_PKG_VERSION")))
                                   .build().map_err(|_| FestiveError::Init)?;
 
     // initiate the main loop
-    if let Err(e) = notify_cycle(&leaderboard, &session, &client, all_years, heartbeat)
+    if let Err(e) = notify_cycle(&leaderboard, &session, &args, &client)
     {
         // attempt to send status message about fatal error
         // ignore these results, as the program is already exiting
@@ -50,7 +41,7 @@ fn main() -> FestiveResult<()>
     Ok(())
 }
 
-fn notify_cycle(leaderboard : &str, session : &str, client : &Client, all_years : bool, heartbeat : bool) -> FestiveResult<()>
+fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Client) -> FestiveResult<()>
 {
     // status message notifying about initilisation
     println!("initialising");
@@ -76,22 +67,29 @@ fn notify_cycle(leaderboard : &str, session : &str, client : &Client, all_years 
     live.extend(2015 .. year);
     if Event::puzzle_unlock(year, 1).map_err(|_| FestiveError::Init)? <= prev { live.push(year) }
 
-    // send AoC API requests only once every 15 minutes
     // use truncated timestamps to ensure complete coverage despite measurement imprecision
-    let period = Duration::minutes(15);
-    prev       = prev.duration_trunc(period).map_err(|_| FestiveError::Init)?;
+    prev = prev.duration_trunc(args.period).map_err(|_| FestiveError::Init)?;
 
     // reusable buffers for efficiency
     let mut events = Vec::new();
     let mut buffer = String::new();
 
     println!("initialisation successful");
-    Webhook::send(&format!(":crab: Initialisation successful! Monitoring leaderboard {leaderboard}... :eyes:"), &[], Webhook::Status, client)?;
+    Webhook::send(":crab: Initialisation successful! :eyes:",
+                  &[("params.txt", format!("leaderboard: {leaderboard}\n\
+                                            all years:   {}\n\
+                                            period:      {}\n\
+                                            heartbeat    {:?}\n\
+                                            live years:  {live:?}\n",
+                                            args.all_years,
+                                            args.period.num_minutes(),
+                                            args.heartbeat.map(|d| d.num_minutes())).as_bytes())],
+                  Webhook::Status, client)?;
 
     loop
     {
         // attempt to sleep until next iteration
-        let current = prev + period;
+        let current = prev + args.period;
         year        = current.year();
         println!("attempting to sleep until {current}");
         match (current - Utc::now()).to_std()
@@ -102,15 +100,15 @@ fn notify_cycle(leaderboard : &str, session : &str, client : &Client, all_years 
         println!();
 
         // if a timestamp has occurred since the previous iteration, it can trigger something to happen this iteration
-        let trigger = |timestamp| prev < timestamp && timestamp <= current;
+        let trigger = |ts| prev < ts && ts <= current;
 
-        // send status message every hour when heartbeat is set
-        if heartbeat
+        // send heartbeat status message when heartbeat is set
+        if let Some(heartbeat_dur) = args.heartbeat
         {
-            let heartbeat_timestamp = current.duration_trunc(Duration::hours(1)).map_err(|_| FestiveError::Conv)?;
-            if trigger(heartbeat_timestamp)
+            let heartbeat_ts = current.duration_trunc(heartbeat_dur).map_err(|_| FestiveError::Conv)?;
+            if trigger(heartbeat_ts)
             {
-                Webhook::send(&format!(":crab: Heartbeat {heartbeat_timestamp} :heart:"), &[], Webhook::Status, client)?;
+                Webhook::send(&format!(":crab: Heartbeat {heartbeat_ts} :heart:"), &[], Webhook::Status, client)?;
             }
         }
 
@@ -122,7 +120,7 @@ fn notify_cycle(leaderboard : &str, session : &str, client : &Client, all_years 
         }
 
         // only report on past years when all_years is set
-        for &request_year in live.iter().filter(|&y| all_years || y == &year)
+        for &request_year in live.iter().filter(|&y| args.all_years || y == &year)
         {
             // send AoC API request, parsing the response to a vector of events
             println!("sending AoC API request for year {request_year}");
