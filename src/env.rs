@@ -45,14 +45,15 @@ impl ArgState
         Args::usage();
         let err = match self
         {
-            ArgState::Period    => "There was an error parsing a parameter for --period:\n\
-                                    - Parameter p is positive integer, representing a number of 15-minute intervals.\n\
-                                    - The default iteration period is the minimum 15 minutes.\n\
-                                    - For example, if p is 4, an iteration will be run once per hour.",
-            ArgState::Heartbeat => "There was an error parsing a parameter for --heartbeat:\n\
-                                    - Parameter i is positive integer, representing a number of iteration periods.\n\
-                                    - By default, no hearbeat status messages are sent; if i is set, they are sent every i iterations.\n\
-                                    - For example, if the period is 30 minutes and i is 6, a heartbeat will be sent every three hours."
+            ArgState::Period    => "There was an error parsing the mins parameter for --period:\n\
+                                    - The parameter is positive integer, representing the iteration period in minutes.\n\
+                                    - The minimum accepted value is 15 minutes, and the maximum is 1440 minutes (one day).\n\
+                                    - By default, if the argument is unset, the iteration period is one hour.",
+            ArgState::Heartbeat => "There was an error parsing the mins parameter for --heartbeat:\n\
+                                    - The parameter is positive integer, representing the interval between heartbeat messages in minutes.\n\
+                                    - The maximum accepted value is 10080 minutes (one week), the minimum being limited by the iteration period (see --period).\n\
+                                    - If not divisible by the iteration period (see `--period`), it will be rounded up to the next multiple.\n\
+                                    - By default, if the argument is unset, no heartbeat messages will be sent."
         };
         println!("{err}");
         std::process::exit(1);
@@ -63,7 +64,7 @@ impl Args
 {
     fn usage()
     {
-        println!("Usage: festive-bot [--all-years] [--period p] [--heartbeat i]");
+        println!("Usage: festive-bot [--all-years] [--period mins] [--heartbeat mins]");
     }
 
     // parse command-line arguments
@@ -73,12 +74,13 @@ impl Args
         let mut current = Args
         {
             all_years: false,
-            period:    Duration::minutes(15),
+            period:    Duration::minutes(60),
             heartbeat: None
         };
 
-        let mut state       = None;
-        let mut heartbeat_i = None;
+        let mut state          = None;
+        let mut period_mins    = current.period.num_minutes();
+        let mut heartbeat_mins = None;
 
         for arg in std::env::args().skip(1)
         {
@@ -91,23 +93,23 @@ impl Args
                 // parse parameter for --period
                 (param, Some(s@ArgState::Period)) =>
                 {
-                    let p          = param.parse::<i32>().ok().filter(|&p| 1 <= p).unwrap_or_else(|| s.error());
-                    current.period = Duration::minutes(15 * p as i64);
-                    state          = None;
+                    period_mins     = param.parse::<i64>().ok().filter(|p| (15 ..= 1440).contains(p)).unwrap_or_else(|| s.error());
+                    current.period  = Duration::minutes(period_mins);
+                    state           = None;
                 },
 
                 // parse parameter for --heartbeat
                 (param, Some(s@ArgState::Heartbeat)) =>
                 {
-                    heartbeat_i = Some(param.parse::<i32>().ok().filter(|&p| 1 <= p).unwrap_or_else(|| s.error()));
-                    state       = None;
+                    heartbeat_mins = Some(param.parse::<i64>().ok().filter(|p| (1 ..= 1440 * 7).contains(p)).unwrap_or_else(|| s.error()));
+                    state          = None;
                 },
 
                 // unexpected argument
                 (arg, None) =>
                 {
                     Args::usage();
-                    println!("There was an unexpected argument: {arg}");
+                    println!("Encountered an unexpected command-line argument: {arg}");
                     std::process::exit(1);
                 }
             }
@@ -117,7 +119,8 @@ impl Args
         if let Some(s) = state { s.error() }
 
         // calculate actual heartbeat duration now the period is known
-        current.heartbeat = heartbeat_i.map(|i| current.period * i);
+        // if not divisible by period_mins, round up to the next multiple
+        current.heartbeat = heartbeat_mins.map(|i| Duration::minutes((i + period_mins - 1) / period_mins * period_mins));
         current
     }
 }

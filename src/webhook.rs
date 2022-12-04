@@ -58,9 +58,9 @@ impl Webhook
                         // keep retrying request until rate-limiting period ends
                         StatusCode::TOO_MANY_REQUESTS =>
                         {
-                            let retry = json::parse(&response.text().map_err(|_| FestiveError::Http)?).map_err(|_| FestiveError::Parse)?["retry_after"].as_f32().unwrap_or(0.0);
-                            println!("rate-limited for {}s", retry);
-                            std::thread::sleep(std::time::Duration::from_millis((retry * 1000.0) as u64));
+                            let retry_secs = json::parse(&response.text().map_err(|_| FestiveError::Http)?).map_err(|_| FestiveError::Parse)?["retry_after"].as_f32().unwrap_or(0.0);
+                            println!("rate-limited for {retry_secs}s");
+                            std::thread::sleep(std::time::Duration::from_millis((retry_secs * 1000.0) as u64));
                         },
 
                         // unexpected status code
