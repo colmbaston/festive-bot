@@ -1,7 +1,7 @@
 #![feature(slice_group_by)]
 
 use std::{ fs::File, io::Read, path::PathBuf };
-use chrono::{ Utc, DateTime, Datelike, Duration, DurationRound };
+use chrono::{ Utc, DateTime, Datelike, Duration };
 use reqwest::blocking::Client;
 
 mod error;
@@ -68,7 +68,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
     if Event::puzzle_unlock(year, 1).map_err(|_| FestiveError::Init)? <= prev { live.push(year) }
 
     // use truncated timestamps to ensure complete coverage despite measurement imprecision
-    prev = prev.duration_trunc(args.period).map_err(|_| FestiveError::Init)?;
+    prev = Event::trunc_ts(&prev, args.period)?;
 
     // reusable buffers for efficiency
     let mut events = Vec::new();
@@ -105,7 +105,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
         // send heartbeat status message when heartbeat is set
         if let Some(heartbeat_dur) = args.heartbeat
         {
-            let heartbeat_ts = current.duration_trunc(heartbeat_dur).map_err(|_| FestiveError::Conv)?;
+            let heartbeat_ts = Event::trunc_ts(&current, heartbeat_dur)?;
             if trigger(heartbeat_ts)
             {
                 Webhook::send(&format!(":crab: Heartbeat {heartbeat_ts} :heart:"), &[], Webhook::Status, client)?;
