@@ -1,6 +1,6 @@
 use std::{ collections::HashMap, fmt::Write };
 use json::JsonValue;
-use chrono::{ DateTime, Utc, TimeZone };
+use chrono::{ DateTime, Utc, FixedOffset, TimeZone, Duration, DurationRound };
 use reqwest::{ blocking::Client, StatusCode };
 use num::{ FromPrimitive, ToPrimitive, rational::BigRational };
 use crate::error::{ FestiveResult, FestiveError };
@@ -30,6 +30,17 @@ impl Event
     pub fn timestamp(&self) -> &DateTime<Utc>
     {
         &self.timestamp
+    }
+
+    // use UTC timestamps, but truncate centered on UTC-05:00 (EST), as this is when puzzles unlock
+    pub fn trunc_ts(ts : &DateTime<Utc>, dur : Duration) -> FestiveResult<DateTime<Utc>>
+    {
+        let est    = FixedOffset::west_opt(5 * 3600).ok_or(FestiveError::Conv)?;
+        let est_ts = ts.with_timezone(&est);
+
+        est_ts.duration_trunc(dur)
+              .map(|dt| dt.with_timezone(&Utc))
+              .map_err(|_| FestiveError::Conv)
     }
 
     // not using Display trait so FestiveResult can be returned
