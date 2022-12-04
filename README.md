@@ -11,27 +11,31 @@ Other services' webhook APIs may be (partially) compatible, but I can make no gu
 ### Environment Variables
 
 Environment variables `FESTIVE_BOT_LEADERBOARD` and `FESTIVE_BOT_SESSION` must be provided at runtime.
-These are the ID of the private leaderboard to monitor, and a session cooike for an AoC account that has access to that leaderboard.
+These are the ID of the private leaderboard to monitor, and a session cookie for an AoC account that has access to that leaderboard.
 
 Optionally, environment variables `FESTIVE_BOT_NOTIFY` and `FESTIVE_BOT_STATUS` may also be provided.
-These are HTTP URLs for webhooks, defining where puzzle completion notifications, and messages about the status of Festive Bot (including unrecoverable errors), repectively, are sent.
+These are HTTP URLs for webhooks, defining where puzzle completion notifications, and messages about the status of Festive Bot (including unrecoverable errors), respectively, are sent.
 Both variables may contain the same URL, and if unset, no HTTP requests will be sent for the corresponding variable.
 
 ### Command-Line Arguments
 
+```
+Usage: festive-bot [--all-years] [--period mins] [--heartbeat mins]
+```
+
 By default, Festive Bot only report on puzzle completions the current year's AoC (and therefore only does anything useful during December).
 Setting the `--all-years` flag allows reporting on puzzle completions for past AoC years as well, though the leaderboard standings for these years won't be posted.
 
-Festive Bot runs in a cycle, checking the AoC API endpoint, sending webhooks, and then sleeping until the beginning of the next iteration.
-The period length between the start of iterations can be controlled with the `--period p` option.
-The parameter `p` is a positive integer representing a number of 15-minute intervals.
-The default iteration period is the minimum 15 minutes; `--period 4` would set this to one hour instead.
+Festive Bot runs in a cycle, fetching events from the AoC leaderboard, sending webhooks, and then sleeping until the beginning of the next iteration.
+The default iteration period is one hour, and can be modified by the `--period` option.
+The parameter is a positive integer representing the iteration period in minutes.
+The minimum accepted value is 15 minutes, limited to avoid requests being sent to the AoC API too frequently, and the maximum is 1440 minutes (one day).
 
-You may optionally send heartbeat status messages to the status webhook.
-This can be useful when Festive Bot is running on a machine that you cannot easily monitor, giving some additional assurance that the bot is still alive.
-The frequency of the messages can be controlled by the `--heartbeat i` option, with none being sent by default.
-The parameter `i` is the a positive integer representing a number of iterations (see the `--period p` option) between heartbeat messages.
-If the iteration period is set to 30 minutes, `--heartbeat 6` would send a heartbeat message every three hours.
+You may optionally send heartbeat status messages to the status webhook, which can be useful when Festive Bot is running on a machine that you cannot easily monitor.
+The frequency of the messages can be controlled by the `--heartbeat` option, with none being sent by default.
+The parameter is a positive integer representing the interval between heartbeats in minutes.
+The maximum accepted value is 10080 minutes (one week), the minimum being limited by the iteration period (see `--period`).
+Since heartbeats occur during the normal cycle of the program, the parameter should be divisible by the iteration period; if not, it is rounded up to the next multiple.
 
 ### Cached Files
 
