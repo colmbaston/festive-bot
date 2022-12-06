@@ -2,7 +2,8 @@ use std::{ collections::HashMap, fmt::Write };
 use json::JsonValue;
 use chrono::{ DateTime, Utc, FixedOffset, TimeZone, Duration, DurationRound };
 use reqwest::{ blocking::Client, StatusCode };
-use num::{ FromPrimitive, ToPrimitive, rational::BigRational };
+use num_rational::BigRational;
+use num_traits::{ identities, FromPrimitive, ToPrimitive };
 use crate::error::{ FestiveResult, FestiveError };
 
 // puzzle completion events parsed from AoC API
@@ -54,7 +55,7 @@ impl Event
         };
 
         let score  = self.score()?;
-        let plural = if score == num::one() { "" } else { "s" };
+        let plural = if score == identities::one() { "" } else { "s" };
         Ok(format!(":christmas_tree: [{}] {} has completed puzzle {:02}, part {part}, scoring {score} point{plural}! {stars}", self.year, self.id.name, self.day))
     }
 
@@ -145,7 +146,7 @@ impl Event
         let mut hist : HashMap<&Identifier, BigRational> = HashMap::new();
         for e in events
         {
-            *hist.entry(&e.id).or_insert_with(num::zero) += e.score()?;
+            *hist.entry(&e.id).or_insert_with(identities::zero) += e.score()?;
         }
 
         // sort by score descending, then by Identifier ascending, and group distinct scores
