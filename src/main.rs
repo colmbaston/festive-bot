@@ -34,8 +34,8 @@ fn main() -> FestiveResult<()>
     {
         // attempt to send status message about fatal error
         // ignore these results, as the program is already exiting
-        let _ = Webhook::send(":warning: Festive Bot experienced an unrecoverable error, exiting!", &[], Webhook::Status, &client);
-        let _ = Webhook::send(&format!(":warning: Error: {e:?}"),                                   &[], Webhook::Status, &client);
+        let _ = Webhook::send("⚠ Festive Bot experienced an unrecoverable error, exiting! ⚠", &[], Webhook::Status, &client);
+        let _ = Webhook::send(&format!("⚠ Error: {e:?} ⚠"),                                   &[], Webhook::Status, &client);
         return Err(e)
     }
     Ok(())
@@ -45,7 +45,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
 {
     // status message notifying about initilisation
     println!("initialising");
-    Webhook::send(&format!(":crab: Festive Bot v{} is initialising...", env!("CARGO_PKG_VERSION")), &[], Webhook::Status, client)?;
+    Webhook::send(&format!("🦀 Festive Bot v{} is initialising... 🤞", env!("CARGO_PKG_VERSION")), &[], Webhook::Status, client)?;
 
     // set handler for POSIX termination signals
     // hander needs to own the HTTP client it uses, so give it a clone
@@ -54,7 +54,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
     ctrlc::set_handler(move ||
     {
         println!("received termination signal, exiting...");
-        let _ = Webhook::send(":crab: Received termination signal, exiting! :wave:", &[], Webhook::Status, &handler_client);
+        let _ = Webhook::send("🦀 Received termination signal, exiting! 👋", &[], Webhook::Status, &handler_client);
         std::process::exit(0);
     })
     .map_err(|_| FestiveError::Init)?;
@@ -75,7 +75,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
     let mut buffer = String::new();
 
     println!("initialisation successful");
-    Webhook::send(":crab: Initialisation successful! :eyes:",
+    Webhook::send("🦀 Initialisation successful! 👀",
                   &[("params.txt", format!("leaderboard: {leaderboard}\n\
                                             all years:   {}\n\
                                             period:      {}\n\
@@ -108,7 +108,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
             let heartbeat_ts = Event::trunc_ts(&current, heartbeat_dur)?;
             if trigger(heartbeat_ts)
             {
-                Webhook::send(&format!(":crab: Heartbeat {heartbeat_ts} :heart:"), &[], Webhook::Status, client)?;
+                Webhook::send(&format!("🦀 Heartbeat {heartbeat_ts} ❤"), &[], Webhook::Status, client)?;
             }
         }
 
@@ -116,7 +116,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
         if trigger(Event::puzzle_unlock(year, 1)?) && live.binary_search(&year).is_err()
         {
             live.push(year);
-            Webhook::send(&format!(":crab: Adding {year} to live years!"), &[], Webhook::Status, client)?;
+            Webhook::send(&format!("🦀 Adding {year} to live years! 🗓"), &[], Webhook::Status, client)?;
         }
 
         // only report on past years when all_years is set
@@ -163,18 +163,18 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
                     // message about a new AoC year
                     if day == 1
                     {
-                        Webhook::send(&format!(":christmas_tree: [{year}] Advent of Code is now live! :tada:"), &[], Webhook::Notify, client)?
+                        Webhook::send(&format!("🎄 [{year}] Advent of Code is now live! 🎉"), &[], Webhook::Notify, client)?
                     }
 
                     // message about new puzzle
                     if day <= 25
                     {
-                        Webhook::send(&format!(":christmas_tree: [{year}] Puzzle {day:02} is now unlocked! :unlock:"), &[], Webhook::Notify, client)?;
+                        Webhook::send(&format!("🎄 [{year}] Puzzle {day:02} is now unlocked! 🔓"), &[], Webhook::Notify, client)?;
                     }
 
                     // message with current leaderboard standings
                     let standings = if events.is_empty() { "No scores yet: get programming!\n".to_string() } else { Event::standings(&events)? };
-                    Webhook::send(&format!(":christmas_tree: [{year}] Current Standings :trophy:"), &[(&format!("standings_{year}_12_{day:02}.txt"), standings.as_bytes())], Webhook::Notify, client)?;
+                    Webhook::send(&format!("🎄 [{year}] Current Standings 🏆"), &[(&format!("standings_{year}_12_{day:02}.txt"), standings.as_bytes())], Webhook::Notify, client)?;
                 }
             }
         }
