@@ -9,8 +9,9 @@ readme      = "README.md"
 license     = "MIT"
 
 [dependencies]
-num      = "0.4.0"
-json     = "0.12.4"
-chrono   = "0.4.23"
-ctrlc    = { version = "3.2.3",   features = ["termination"] }
-reqwest  = { version = "0.11.13", features = ["blocking", "multipart"] }
+json         = "0.12.4"
+chrono       = "0.4.23"
+num-traits   = "0.2.15"
+num-rational = "0.4.1"
+ctrlc        = { version = "3.2.3",   features = ["termination"] }
+reqwest      = { version = "0.11.13", features = ["blocking", "multipart"] }
