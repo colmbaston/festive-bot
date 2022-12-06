@@ -143,15 +143,18 @@ impl Event
     pub fn standings(events : &[Event]) -> FestiveResult<String>
     {
         // score histogram
-        let mut hist : HashMap<&Identifier, BigRational> = HashMap::new();
+        let mut hist : HashMap<&Identifier, (BigRational, HashMap<u8, u8>)> = HashMap::new();
         for e in events
         {
-            *hist.entry(&e.id).or_insert_with(identities::zero) += e.score()?;
+            let (score, stars) = hist.entry(&e.id).or_insert_with(|| (identities::zero(), HashMap::new()));
+            *score                                 += e.score()?;
+            *stars.entry(e.day as u8).or_insert(0) += 1;
         }
 
-        // sort by score descending, then by Identifier ascending, and group distinct scores
+        // sort by score descending, then by star count descending, then by Identifier ascending
+        // group distinct scores
         let mut scores = hist.into_iter().collect::<Vec<_>>();
-        scores.sort_unstable_by_key(|(id, score)| (-score, *id));
+        scores.sort_unstable_by_key(|(id, (score, stars))| (-score, u8::MAX - stars.values().sum::<u8>(), *id));
         let distinct = scores.group_by(|a, b| a.1 == b.1).collect::<Vec<_>>();
 
         // calculate width for positions
@@ -171,7 +174,7 @@ impl Event
         // calculate width for scores
         // the width of the maximum score, formatted to two decimal places
         let width_score = scores.iter()
-                                .map(|(_,  s)| s)
+                                .map(|(_, (s, _))| s)
                                 .max()
                                 .map(|s| 4 + s.to_f64().unwrap_or(0.0).log10().floor() as usize)
                                 .unwrap_or(0);
@@ -180,12 +183,16 @@ impl Event
         let mut report = String::new();
         for (pos, grp) in distinct.into_iter().scan(1, |pos, grp| { let old = *pos; *pos += grp.len(); Some((old, grp)) })
         {
-            for (ix, (id, score)) in grp.iter().enumerate()
+            for (ix, (id, (score, stars))) in grp.iter().enumerate()
             {
-                writeln!(&mut report, "{:>width_pos$} {:<width_name$} {:>width_score$.02}",
+                writeln!(&mut report, "{:>width_pos$} {:<width_name$} {:>width_score$.02}  [{}]",
                                       if ix == 0 { format!("{pos})") } else { String::new() },
                                       format!("{}:", id.name),
-                                      score.to_f64().unwrap()).map_err(|_| FestiveError::Conv)?;
+                                      score.to_f64().ok_or(FestiveError::Conv)?,
+                                      (1 ..= 25).map(|d| match stars.get(&d).unwrap_or(&0) { 0 => " -", 1 => " ☆", _ => " ★" })
+                                                .chain(std::iter::once(" "))
+                                                .collect::<String>()
+                        ).map_err(|_| FestiveError::Conv)?;
             }
         }
         Ok(report)
