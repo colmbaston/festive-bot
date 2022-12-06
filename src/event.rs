@@ -189,7 +189,7 @@ impl Event
                                       if ix == 0 { format!("{pos})") } else { String::new() },
                                       format!("{}:", id.name),
                                       score.to_f64().ok_or(FestiveError::Conv)?,
-                                      (1 ..= 25).map(|d| match stars.get(&d).unwrap_or(&0) { 0 => " -", 1 => " ☆", _ => " ★" })
+                                      (1 ..= 25).map(|d| match stars.get(&d).unwrap_or(&0) { 0 => " -", 1 => " □", _ => " ■" })
                                                 .chain(std::iter::once(" "))
                                                 .collect::<String>()
                         ).map_err(|_| FestiveError::Conv)?;
