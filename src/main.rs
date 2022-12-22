@@ -79,10 +79,12 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
                   &[("params.txt", format!("leaderboard: {leaderboard}\n\
                                             all years:   {}\n\
                                             period:      {}\n\
+                                            standings:   {}\n\
                                             heartbeat    {:?}\n\
                                             live years:  {live:?}\n",
                                             args.all_years,
                                             args.period.num_minutes(),
+                                            args.standings.num_minutes(),
                                             args.heartbeat.map(|d| d.num_minutes())).as_bytes())],
                   Webhook::Status, client)?;
 
@@ -154,25 +156,26 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
                 std::fs::write(&timestamp_path, e.timestamp().to_rfc3339()).map_err(|_| FestiveError::File)?;
             }
 
-            // make announcements once per day during December
+            // announcements made only during December
             if request_year == year && current.month() == 12
             {
+                // daily puzzle-unlock announcement
                 let day = current.day();
-                if trigger(Event::puzzle_unlock(year, day)?)
+                if day <= 25 && trigger(Event::puzzle_unlock(year, day)?)
                 {
-                    // message about a new AoC year
+                    // new AoC year announcement
                     if day == 1
                     {
                         Webhook::send(&format!("🎄 [{year}] Advent of Code is now live! 🎉"), &[], Webhook::Notify, client)?
                     }
 
-                    // message about new puzzle
-                    if day <= 25
-                    {
-                        Webhook::send(&format!("🎄 [{year}] Puzzle {day:02} is now unlocked! 🔓"), &[], Webhook::Notify, client)?;
-                    }
+                    // new puzzle announcement
+                    Webhook::send(&format!("🎄 [{year}] Puzzle {day:02} is now unlocked! 🔓"), &[], Webhook::Notify, client)?;
+                }
 
-                    // message with current leaderboard standings
+                // leaderboard standings announcement
+                if trigger(Event::trunc_ts(&current, args.standings)?)
+                {
                     let standings = if events.is_empty() { "No scores yet: get programming!\n".to_string() } else { Event::standings(&events)? };
                     Webhook::send(&format!("🎄 [{year}] Current Standings 🏆"), &[(&format!("standings_{year}_12_{day:02}.txt"), standings.as_bytes())], Webhook::Notify, client)?;
                 }
