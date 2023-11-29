@@ -7,7 +7,7 @@ pub enum Var { Leaderboard, Session, Notify, Status }
 
 impl Var
 {
-    fn key(&self) -> &'static str
+    pub fn key(&self) -> &'static str
     {
         match self
         {

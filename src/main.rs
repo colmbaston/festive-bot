@@ -16,7 +16,16 @@ use event::Event;
 mod webhook;
 use webhook::Webhook;
 
-fn main() -> FestiveResult<()>
+fn main()
+{
+    if let Err(e) = initialise()
+    {
+        println!("{e}");
+        std::process::exit(1)
+    }
+}
+
+fn initialise() -> FestiveResult<()>
 {
     // mandatory environment variables
     let leaderboard = Var::Leaderboard.get()?;
@@ -30,15 +39,15 @@ fn main() -> FestiveResult<()>
                                   .build().map_err(|_| FestiveError::Init)?;
 
     // initiate the main loop
-    if let Err(e) = notify_cycle(&leaderboard, &session, &args, &client)
+    let result = notify_cycle(&leaderboard, &session, &args, &client);
+    if let Err(e) = &result
     {
         // attempt to send status message about fatal error
         // ignore these results, as the program is already exiting
         let _ = Webhook::send("⚠ Festive Bot experienced an unrecoverable error, exiting! ⚠", &[], Webhook::Status, &client);
         let _ = Webhook::send(&format!("⚠ Error: {e:?} ⚠"),                                   &[], Webhook::Status, &client);
-        return Err(e)
     }
-    Ok(())
+    result
 }
 
 fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Client) -> FestiveResult<()>
