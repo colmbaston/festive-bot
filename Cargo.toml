@@ -1,6 +1,6 @@
 [package]
 name        = "festive-bot"
-version     = "1.1.0"
+version     = "1.1.1"
 authors     = ["Colm Baston"]
 edition     = "2021"
 description = "A bot to track events occurring on a private Advent of Code leaderboard."
@@ -12,6 +12,6 @@ license     = "MIT"
 json         = { version = "0.12.4" }
 num-traits   = { version = "0.2.17" }
 num-rational = { version = "0.4.1"  }
-ctrlc        = { version = "3.4.1",   features = ["termination"] }
-reqwest      = { version = "0.11.22", features = ["blocking", "multipart"] }
+ctrlc        = { version = "3.4.2",   features = ["termination"] }
+reqwest      = { version = "0.11.23", features = ["blocking", "multipart"] }
 chrono       = { version = "0.4.31",  features = ["clock"], default-features = false }

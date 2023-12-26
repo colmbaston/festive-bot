@@ -188,6 +188,12 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
                     let standings = if events.is_empty() { "No scores yet: get programming!\n".to_string() } else { Event::standings(&events)? };
                     Webhook::send(&format!("🎄 [{year}] Current Standings 🏆"), &[(&format!("standings_{year}_12_{day:02}.txt"), standings.as_bytes())], Webhook::Notify, client)?;
                 }
+
+                // sign off for the year
+                if (current + args.period).year() != request_year
+                {
+                    Webhook::send(&format!("🎄 [{year}] Festive Bot signing off. Happy New Year! 👋"), &[], Webhook::Notify, client)?;
+                }
             }
         }
 
