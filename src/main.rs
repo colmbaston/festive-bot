@@ -44,8 +44,8 @@ fn initialise() -> FestiveResult<()>
     {
         // attempt to send status message about fatal error
         // ignore these results, as the program is already exiting
-        let _ = Webhook::send("⚠ Festive Bot experienced an unrecoverable error, exiting! ⚠", &[], Webhook::Status, &client);
-        let _ = Webhook::send(&format!("⚠ Error: {e:?} ⚠"),                                   &[], Webhook::Status, &client);
+        let _ = Webhook::send("⚠ Festive Bot experienced an unrecoverable error, exiting!", &[], Webhook::Status, &client);
+        let _ = Webhook::send(&format!("⚠ Error: {e:?}"),                                   &[], Webhook::Status, &client);
     }
     result
 }
@@ -54,7 +54,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
 {
     // status message notifying about initilisation
     println!("initialising");
-    Webhook::send(&format!("🦀 Festive Bot v{} is initialising... 🤞", env!("CARGO_PKG_VERSION")), &[], Webhook::Status, client)?;
+    Webhook::send(&format!("🦀 Festive Bot v{} is initialising...", env!("CARGO_PKG_VERSION")), &[], Webhook::Status, client)?;
 
     // set handler for POSIX termination signals
     // hander needs to own the HTTP client it uses, so give it a clone
@@ -63,7 +63,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
     ctrlc::set_handler(move ||
     {
         println!("received termination signal, exiting...");
-        let _ = Webhook::send("🦀 Received termination signal, exiting! 👋", &[], Webhook::Status, &handler_client);
+        let _ = Webhook::send("🦀 Received termination signal, exiting!", &[], Webhook::Status, &handler_client);
         std::process::exit(0);
     })
     .map_err(|_| FestiveError::Init)?;
@@ -84,7 +84,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
     let mut buffer = String::new();
 
     println!("initialisation successful");
-    Webhook::send("🦀 Initialisation successful! 👀",
+    Webhook::send("🦀 Initialisation successful!",
                   &[("params.txt", format!("leaderboard: {leaderboard}\n\
                                             all years:   {}\n\
                                             period:      {}\n\
@@ -119,7 +119,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
             let heartbeat_ts = Event::trunc_ts(&current, heartbeat_dur)?;
             if trigger(heartbeat_ts)
             {
-                Webhook::send(&format!("🦀 Heartbeat {heartbeat_ts} ❤"), &[], Webhook::Status, client)?;
+                Webhook::send(&format!("🦀 Heartbeat {heartbeat_ts}"), &[], Webhook::Status, client)?;
             }
         }
 
@@ -127,7 +127,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
         if trigger(Event::puzzle_unlock(year, 1)?) && live.binary_search(&year).is_err()
         {
             live.push(year);
-            Webhook::send(&format!("🦀 Adding {year} to live years! 🗓"), &[], Webhook::Status, client)?;
+            Webhook::send(&format!("🦀 Adding {year} to live years!"), &[], Webhook::Status, client)?;
         }
 
         // only report on past years when all_years is set
