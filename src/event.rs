@@ -155,7 +155,7 @@ impl Event
         // group distinct scores
         let mut scores = hist.into_iter().collect::<Vec<_>>();
         scores.sort_unstable_by_key(|(id, (score, stars))| (-score, u8::MAX - stars.values().sum::<u8>(), *id));
-        let distinct = scores.group_by(|a, b| a.1 == b.1).collect::<Vec<_>>();
+        let distinct = scores.chunk_by(|a, b| a.1 == b.1).collect::<Vec<_>>();
 
         // calculate width for positions
         // the width of the maximum position to be displayed, plus one for ')'

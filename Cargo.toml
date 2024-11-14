@@ -1,6 +1,6 @@
 [package]
 name        = "festive-bot"
-version     = "1.1.1"
+version     = "1.1.2"
 authors     = ["Colm Baston"]
 edition     = "2021"
 description = "A bot to track events occurring on a private Advent of Code leaderboard."

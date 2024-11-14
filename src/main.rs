@@ -1,5 +1,3 @@
-#![feature(slice_group_by)]
-
 use std::{ fs::File, io::Read, path::PathBuf };
 use chrono::{ Utc, DateTime, Datelike, Duration };
 use reqwest::blocking::Client;
