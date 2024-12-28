@@ -68,11 +68,9 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
 
     // populate currently-live AoC years
     println!("determining currently-live AoC years");
-    let mut live = Vec::new();
     let mut prev = Utc::now();
     let mut year = prev.year();
-    live.extend(2015 .. year);
-    if Event::puzzle_unlock(year, 1).map_err(|_| FestiveError::Init)? <= prev { live.push(year) }
+    let mut live = 2015 ..= if Event::puzzle_unlock(year, 1).map_err(|_| FestiveError::Init)? <= prev { year } else { year-1 };
 
     // use truncated timestamps to ensure complete coverage despite measurement imprecision
     prev = Event::trunc_ts(&prev, args.period)?;
@@ -122,14 +120,14 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
         }
 
         // extend live years if puzzle one of this year has unlocked
-        if trigger(Event::puzzle_unlock(year, 1)?) && live.binary_search(&year).is_err()
+        if trigger(Event::puzzle_unlock(year, 1)?) && *live.end() != year
         {
-            live.push(year);
+            live = 2015 ..= year;
             Webhook::send(&format!("🦀 Adding {year} to live years!"), &[], Webhook::Status, client)?;
         }
 
         // only report on past years when all_years is set
-        for &request_year in live.iter().filter(|&y| args.all_years || y == &year)
+        for request_year in live.clone().filter(|&y| args.all_years || y == year)
         {
             // send AoC API request, parsing the response to a vector of events
             println!("sending AoC API request for year {request_year}");
