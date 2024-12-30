@@ -1,5 +1,5 @@
 use std::{ fs::File, io::Read, path::PathBuf };
-use chrono::{ Utc, DateTime, Datelike, Duration };
+use chrono::{ Utc, DateTime, Datelike, TimeDelta };
 use reqwest::blocking::Client;
 
 mod error;
@@ -149,7 +149,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
             .unwrap_or_else(||
             {
                 println!("timestamp read failed, defaulting to 28 days ago");
-                current - Duration::days(28)
+                current - TimeDelta::days(28)
             });
             println!("obtained timestamp {timestamp}");
 
@@ -179,7 +179,7 @@ fn notify_cycle(leaderboard : &str, session : &str, args : &Args, client : &Clie
                 }
 
                 // leaderboard standings announcement
-                if trigger(Event::trunc_ts(&current, args.standings)?)
+                if trigger(Event::trunc_ts(&current, args.standings)?) && current - timestamp < TimeDelta::days(1)
                 {
                     let standings = if events.is_empty() { "No scores yet: get programming!\n".to_string() } else { Event::standings(&events)? };
                     Webhook::send(&format!("🎄 [{year}] Current Standings 🏆"), &[(&format!("standings_{year}_12_{day:02}.txt"), standings.as_bytes())], Webhook::Notify, client)?;
